@@ -1,89 +1,94 @@
-
 <script setup>
-import { ref, onMounted } from 'vue'
-
-// Nutrition preferences matching dining_api.py
-const calories = ref('')
-const carbs = ref('')
-const protein = ref('')
-const saturatedFat = ref('')
+import { computed, onMounted, ref } from 'vue'
 
 const message = ref('')
 const error = ref('')
+const nextId = ref(0)
+const STORAGE_VERSION = 2
+const STORAGE_KEY = 'nutritionPreferences'
+const nutrients = [
+  { key: 'calories', label: 'Calories', unit: 'kcal', step: '1' },
+  { key: 'carbs', label: 'Carbohydrates', unit: 'g', step: '0.1' },
+  { key: 'protein', label: 'Protein', unit: 'g', step: '0.1' },
+  { key: 'saturated_fat', label: 'Saturated Fat', unit: 'g', step: '0.1' },
+]
+const entries = ref([])
+const availableNutrients = computed(() => nutrients.filter(
+  nutrient => !entries.value.some(entry => entry.key === nutrient.key)
+))
 
-// Save preferences in the browser
+function addEntry() {
+  if (!availableNutrients.value.length) return
+  entries.value.push({ id: nextId.value++, key: '', value: '' })
+  error.value = ''
+  message.value = ''
+}
+
+function removeEntry(id) {
+  entries.value = entries.value.filter(entry => entry.id !== id)
+  error.value = ''
+  message.value = ''
+}
+
 function savePreferences() {
   message.value = ''
   error.value = ''
 
-  const fields = [
-    calories.value,
-    carbs.value,
-    protein.value,
-    saturatedFat.value
-  ]
+  const preferences = {}
+  for (const entry of entries.value) {
+    if (!entry.key) continue
 
-  // Check for empty inputs
-  if (fields.some(value => value === '' || value === null)) {
-    error.value = 'Please fill in all nutrition fields.'
-    return
-  }
+    if (entry.value === '' || entry.value === null) {
+      error.value = `Please enter a value for ${nutrients.find(item => item.key === entry.key).label}.`
+      return
+    }
 
-  const numbers = fields.map(Number)
-
-  // Validate nutrition inputs
-  if (numbers.some(value => !Number.isFinite(value) || value < 0)) {
-    error.value = 'Please enter valid, non-negative numbers.'
-    return
-  }
-
-  const preferences = {
-    calories: numbers[0],
-    carbs: numbers[1],
-    protein: numbers[2],
-    saturated_fat: numbers[3]
+    const value = Number(entry.value)
+    if (!Number.isFinite(value) || value < 0 || value > 100000) {
+      error.value = 'Please enter valid numbers between 0 and 100000.'
+      return
+    }
+    preferences[entry.key] = value
   }
 
   try {
-    localStorage.setItem(
-      'nutritionPreferences',
-      JSON.stringify(preferences)
-    )
-
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: STORAGE_VERSION,
+      goals: preferences,
+    }))
     message.value = 'Nutrition preferences saved successfully!'
   } catch {
     error.value = 'Unable to save preferences in this browser.'
   }
 }
 
-// Load previously saved preferences
 function loadPreferences() {
   try {
-    const saved = localStorage.getItem('nutritionPreferences')
-
+    const saved = localStorage.getItem(STORAGE_KEY)
     if (!saved) return
 
-    const preferences = JSON.parse(saved)
+    const stored = JSON.parse(saved)
+    if (stored?.version !== STORAGE_VERSION) return
+    if (!stored.goals || typeof stored.goals !== 'object' || Array.isArray(stored.goals)) {
+      throw new Error('Saved preferences must be an object.')
+    }
 
-    calories.value = preferences.calories ?? ''
-    carbs.value = preferences.carbs ?? ''
-    protein.value = preferences.protein ?? ''
-    saturatedFat.value = preferences.saturated_fat ?? ''
+    entries.value = nutrients
+      .filter(nutrient => stored.goals[nutrient.key] !== undefined && stored.goals[nutrient.key] !== null && stored.goals[nutrient.key] !== '')
+      .map(nutrient => ({
+        id: nextId.value++,
+        key: nutrient.key,
+        value: String(stored.goals[nutrient.key]),
+      }))
   } catch {
     error.value = 'Unable to load saved preferences.'
   }
 }
 
-// Reset preferences
 function resetPreferences() {
   try {
-    localStorage.removeItem('nutritionPreferences')
-
-    calories.value = ''
-    carbs.value = ''
-    protein.value = ''
-    saturatedFat.value = ''
-
+    localStorage.removeItem(STORAGE_KEY)
+    entries.value = []
     error.value = ''
     message.value = 'Preferences have been reset.'
   } catch {
@@ -91,7 +96,6 @@ function resetPreferences() {
   }
 }
 
-// Automatically load when component appears
 onMounted(loadPreferences)
 </script>
 
@@ -100,87 +104,62 @@ onMounted(loadPreferences)
     <div class="nutrition-header">
       <h2>Daily Nutrition Preferences</h2>
       <p>
-        Enter your preferred daily nutrition goals to help
-        personalize your dining recommendations.
+        Add only the nutrition goals you want considered in your dining recommendations.
       </p>
     </div>
 
     <form @submit.prevent="savePreferences">
-      <div class="nutrition-flexbox">
-
-        <!-- Calories -->
-        <div class="nutrition-field">
-          <label for="calories">Calories</label>
-          <div class="input-wrapper">
-            <input
-              id="calories"
-              v-model="calories"
-              type="number"
-              min="0"
-              max="100000"
-              step="1"
-              placeholder="2000"
-              required
-            />
-            <span class="unit">kcal</span>
+      <div v-if="entries.length" class="nutrition-flexbox">
+        <div v-for="entry in entries" :key="entry.id" class="nutrition-entry">
+          <div class="nutrition-field">
+            <label :for="`nutrition-${entry.id}-type`">Nutrition</label>
+            <select :id="`nutrition-${entry.id}-type`" v-model="entry.key">
+              <option value="">Choose a nutrition</option>
+              <option
+                v-for="nutrient in nutrients.filter(item => item.key === entry.key || !entries.some(other => other.key === item.key))"
+                :key="nutrient.key"
+                :value="nutrient.key"
+              >
+                {{ nutrient.label }}
+              </option>
+            </select>
           </div>
-        </div>
-
-        <!-- Carbohydrates -->
-        <div class="nutrition-field">
-          <label for="carbs">Carbohydrates</label>
-          <div class="input-wrapper">
-            <input
-              id="carbs"
-              v-model="carbs"
-              type="number"
-              min="0"
-              max="100000"
-              step="0.1"
-              placeholder="250"
-              required
-            />
-            <span class="unit">g</span>
+          <div v-if="entry.key" class="nutrition-field">
+            <label :for="`nutrition-${entry.id}-value`">
+              {{ nutrients.find(item => item.key === entry.key).label }} goal
+            </label>
+            <div class="input-wrapper">
+              <input
+                :id="`nutrition-${entry.id}-value`"
+                v-model="entry.value"
+                type="number"
+                min="0"
+                max="100000"
+                :step="nutrients.find(item => item.key === entry.key).step"
+                required
+              />
+              <span class="unit">{{ nutrients.find(item => item.key === entry.key).unit }}</span>
+            </div>
           </div>
+          <button
+            type="button"
+            class="remove-nutrition"
+            :aria-label="`Remove ${entry.key ? nutrients.find(item => item.key === entry.key).label : 'nutrition'} goal`"
+            @click="removeEntry(entry.id)"
+          >
+            Remove
+          </button>
         </div>
-
-        <!-- Protein -->
-        <div class="nutrition-field">
-          <label for="protein">Protein</label>
-          <div class="input-wrapper">
-            <input
-              id="protein"
-              v-model="protein"
-              type="number"
-              min="0"
-              max="100000"
-              step="0.1"
-              placeholder="100"
-              required
-            />
-            <span class="unit">g</span>
-          </div>
-        </div>
-
-        <!-- Saturated Fat -->
-        <div class="nutrition-field">
-          <label for="saturated-fat">Saturated Fat</label>
-          <div class="input-wrapper">
-            <input
-              id="saturated-fat"
-              v-model="saturatedFat"
-              type="number"
-              min="0"
-              max="100000"
-              step="0.1"
-              placeholder="20"
-              required
-            />
-            <span class="unit">g</span>
-          </div>
-        </div>
-
       </div>
+
+      <button
+        type="button"
+        class="add-nutrition"
+        :disabled="availableNutrients.length === 0"
+        @click="addEntry"
+      >
+        <span aria-hidden="true">+</span> Add nutrition
+      </button>
 
       <!-- Status messages -->
       <p v-if="error" class="error-message" role="alert">
@@ -254,6 +233,17 @@ onMounted(loadPreferences)
   gap: 8px;
 }
 
+.nutrition-entry {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: end;
+  gap: 12px;
+}
+
+.nutrition-entry .nutrition-field {
+  flex: 1 1 220px;
+}
+
 .nutrition-field label {
   font-size: 14px;
   font-weight: 600;
@@ -296,6 +286,47 @@ onMounted(loadPreferences)
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 28px;
+}
+
+.add-nutrition,
+.remove-nutrition {
+  border: 1px solid #b71932;
+  border-radius: 8px;
+  color: #b71932;
+  background: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.add-nutrition {
+  margin-top: 20px;
+  padding: 10px 14px;
+}
+
+.add-nutrition span {
+  margin-right: 4px;
+  font-size: 20px;
+  line-height: 0;
+  vertical-align: -1px;
+}
+
+.add-nutrition:hover:not(:disabled),
+.remove-nutrition:hover {
+  background: #fff8f9;
+}
+
+.add-nutrition:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.remove-nutrition {
+  min-height: 46px;
+  padding: 0 12px;
+  border-color: #d1d5db;
+  color: #4b5563;
+  white-space: nowrap;
 }
 
 .save-button,
@@ -344,6 +375,15 @@ onMounted(loadPreferences)
 
   .nutrition-field {
     flex-basis: 100%;
+  }
+
+  .nutrition-entry {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nutrition-entry .nutrition-field {
+    flex-basis: auto;
   }
 
   .button-container button {
