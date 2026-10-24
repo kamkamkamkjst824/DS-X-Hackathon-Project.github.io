@@ -1,11 +1,16 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { ApiError, request } from '../api.js'
 
+// Goals are stored per account in the Worker (D1), endpoint /api/nutrition-preferences.
+const props = defineProps({ token: { type: String, required: true } })
+const emit = defineEmits(['expired'])
+
+const PATH = '/api/nutrition-preferences'
 const message = ref('')
 const error = ref('')
+const saving = ref(false)
 const nextId = ref(0)
-const STORAGE_VERSION = 2
-const STORAGE_KEY = 'nutritionPreferences'
 const nutrients = [
   { key: 'calories', label: 'Calories', unit: 'kcal', step: '1' },
   { key: 'carbs', label: 'Carbohydrates', unit: 'g', step: '0.1' },
@@ -30,7 +35,23 @@ function removeEntry(id) {
   message.value = ''
 }
 
-function savePreferences() {
+function handleError(cause, fallback) {
+  if (cause instanceof ApiError && cause.status === 401) emit('expired')
+  error.value = cause instanceof Error ? cause.message : fallback
+}
+
+async function putGoals(goals) {
+  saving.value = true
+  try {
+    await request(PATH, { method: 'PUT', token: props.token, body: { goals } })
+    return true
+  } finally {
+    saving.value = false
+  }
+}
+
+async function savePreferences() {
+  if (saving.value) return
   message.value = ''
   error.value = ''
 
@@ -52,47 +73,42 @@ function savePreferences() {
   }
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      version: STORAGE_VERSION,
-      goals: preferences,
-    }))
+    await putGoals(preferences)
     message.value = 'Nutrition preferences saved successfully!'
-  } catch {
-    error.value = 'Unable to save preferences in this browser.'
+  } catch (cause) {
+    handleError(cause, 'Unable to save preferences. Please try again.')
   }
 }
 
-function loadPreferences() {
+async function loadPreferences() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) return
-
-    const stored = JSON.parse(saved)
-    if (stored?.version !== STORAGE_VERSION) return
-    if (!stored.goals || typeof stored.goals !== 'object' || Array.isArray(stored.goals)) {
-      throw new Error('Saved preferences must be an object.')
+    const { goals } = await request(PATH, { token: props.token })
+    if (!goals || typeof goals !== 'object' || Array.isArray(goals)) {
+      throw new Error('Saved nutrition preferences have an unexpected format.')
     }
 
     entries.value = nutrients
-      .filter(nutrient => stored.goals[nutrient.key] !== undefined && stored.goals[nutrient.key] !== null && stored.goals[nutrient.key] !== '')
+      .filter(nutrient => typeof goals[nutrient.key] === 'number')
       .map(nutrient => ({
         id: nextId.value++,
         key: nutrient.key,
-        value: String(stored.goals[nutrient.key]),
+        value: String(goals[nutrient.key]),
       }))
-  } catch {
-    error.value = 'Unable to load saved preferences.'
+  } catch (cause) {
+    handleError(cause, 'Unable to load saved preferences.')
   }
 }
 
-function resetPreferences() {
+async function resetPreferences() {
+  if (saving.value) return
+  error.value = ''
+  message.value = ''
   try {
-    localStorage.removeItem(STORAGE_KEY)
+    await putGoals({})
     entries.value = []
-    error.value = ''
     message.value = 'Preferences have been reset.'
-  } catch {
-    error.value = 'Unable to reset preferences.'
+  } catch (cause) {
+    handleError(cause, 'Unable to reset preferences.')
   }
 }
 
@@ -165,13 +181,14 @@ onMounted(loadPreferences)
 
       <!-- Buttons -->
       <div class="button-container">
-        <button type="submit" class="save-button">
-          Save Preferences
+        <button type="submit" class="save-button" :disabled="saving">
+          {{ saving ? 'Saving…' : 'Save Preferences' }}
         </button>
 
         <button
           type="button"
           class="reset-button"
+          :disabled="saving"
           @click="resetPreferences"
         >
           Reset

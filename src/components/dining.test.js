@@ -66,6 +66,7 @@ function diningItem(overrides = {}) {
 function recommendFetch(handler, locationRanks = LOCATION_RANKS) {
   return mockFetch((url, init) => {
     if (url.endsWith('/api/location-preferences')) return jsonResponse({ preferences: locationRanks })
+    if (url.endsWith('/api/nutrition-preferences')) return jsonResponse({ goals: {}, updatedAt: null })
     if (url.endsWith('/api/preferences')) return jsonResponse({ preferences: SAVED, updatedAt: 1 })
     return handler(url, init)
   })

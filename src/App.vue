@@ -182,7 +182,7 @@ onMounted(restoreSession)
         <div class="dining-planner">
           <h2>Daily Nutrition Preferences</h2>
           <p class="intro">Add only the nutrition goals you want considered in your dining recommendations.</p>
-          <NutritionPreferences />
+          <NutritionPreferences :token="token" @expired="sessionExpired" />
         </div>
         <RecommendationPriorities />
         <RecommendPanel :token="token" @expired="sessionExpired" />

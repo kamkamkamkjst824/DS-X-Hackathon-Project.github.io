@@ -166,16 +166,12 @@ export function rankRecommendations(recommendations, {
   }
 }
 
-export function readNutritionGoals(storage = globalThis.localStorage) {
-  const saved = storage.getItem('nutritionPreferences')
-  if (!saved) return {}
-
-  const stored = JSON.parse(saved)
-  if (stored?.version !== 2) return {}
-  if (!stored.goals || typeof stored.goals !== 'object' || Array.isArray(stored.goals)) {
+export async function readNutritionGoals(token) {
+  const { goals } = await request('/api/nutrition-preferences', { token })
+  if (!goals || typeof goals !== 'object' || Array.isArray(goals)) {
     throw new Error('Saved nutrition preferences are invalid. Reset and save them again.')
   }
-  return stored.goals
+  return goals
 }
 
 export function readPriorityOrder(storage = globalThis.localStorage) {
