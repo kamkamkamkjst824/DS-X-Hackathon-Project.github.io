@@ -65,7 +65,7 @@ function diningItem(overrides = {}) {
 
 function recommendFetch(handler, locationRanks = LOCATION_RANKS) {
   return mockFetch((url, init) => {
-    if (url === '/api/preferences') return jsonResponse({ preferences: locationRanks })
+    if (url.endsWith('/api/location-preferences')) return jsonResponse({ preferences: locationRanks })
     if (url.endsWith('/api/preferences')) return jsonResponse({ preferences: SAVED, updatedAt: 1 })
     return handler(url, init)
   })
@@ -119,17 +119,19 @@ describe('PreferencesForm', () => {
 describe('LocationPreference', () => {
   it('saves only ranked locations and omits locations marked "Don\'t want"', async () => {
     const fetchMock = mockFetch((url, init) => {
-      if (init?.method === 'POST') return jsonResponse({ preferences: JSON.parse(init.body) })
+      if (init?.method === 'PUT') return jsonResponse(JSON.parse(init.body))
       return jsonResponse({ preferences: LOCATION_RANKS })
     })
-    const wrapper = mount(LocationPreference)
+    const wrapper = mount(LocationPreference, { props: { token: TOKEN } })
     await flushPromises()
 
     await wrapper.find('#preference-west').setValue('excluded')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    const [, init] = fetchMock.mock.calls.find(([, options]) => options?.method === 'POST')
+    const [url, init] = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')
+    expect(url).toMatch(/\/api\/location-preferences$/)
+    expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`)
     expect(JSON.parse(init.body)).toEqual({
       preferences: [
         { rank: 1, location: 'warren' },

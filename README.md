@@ -4,7 +4,9 @@ A dining hall and dish recommendation project for Boston University students. Si
 
 The application supports Warren Towers (`warren`), West Campus (`west`), and Marciano Commons (`marciano`). The frontend uses Vue 3, Vite, and custom CSS, without a UI component library.
 
-This README describes the current implementation, including its prototype limitations. **The complete local experience requires the Vite frontend, a Python location-preference service, and a reachable Cloudflare Worker. The BU API key belongs on the Worker, not in the frontend.**
+**Deployment update (2026-10-24): Python is no longer required by the frontend.** Location preferences now use authenticated `GET /api/location-preferences` and `PUT /api/location-preferences` on the Worker, with `{ preferences: [{ location: 'warren', rank: 1 }] }`. D1 stores a separate list for each account. Apply `0003_locations.sql` before deploying the updated Worker. New accounts start with an empty list and must save their selection before requesting recommendations. Existing shared `user.py` values are not copied into individual accounts. Nutrition targets remain browser-local. The BU API key belongs on the Worker, not in the frontend.
+
+The Python architecture and setup instructions below describe the legacy prototype; skip Python startup and proxy instructions when running this version. Use `npm run dev` locally, or `npm run build` with output directory `dist` on Vercel.
 
 ## Contents
 

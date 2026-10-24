@@ -1,3 +1,5 @@
+import { request } from './api.js'
+
 const DIETS = [
   { key: 'vegan', label: 'Vegan' },
   { key: 'vegetarian', label: 'Vegetarian' },
@@ -194,12 +196,8 @@ export function readPriorityOrder(storage = globalThis.localStorage) {
   return Object.fromEntries(categories.map(category => [category, stored.order[category]]))
 }
 
-export async function readLocationRanks(fetcher = globalThis.fetch) {
-  const response = await fetcher('/api/preferences', { cache: 'no-store' })
-  if (!response.ok) {
-    throw new Error(`Could not load saved dining location preferences (${response.status}).`)
-  }
-  const result = await response.json()
+export async function readLocationRanks(token) {
+  const result = await request('/api/location-preferences', { token })
   if (!Array.isArray(result.preferences)) {
     throw new Error('Saved dining location preferences have an unexpected format.')
   }

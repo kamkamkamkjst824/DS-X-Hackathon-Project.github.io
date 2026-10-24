@@ -1,5 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { ApiError, request } from '../api.js'
+
+const props = defineProps({ token: { type: String, required: true } })
+const emit = defineEmits(['expired'])
 
 const locations = [
   { id: 'warren', name: 'Warren Towers' },
@@ -37,19 +41,17 @@ async function savePreferences() {
   message.value = ''
 
   try {
-    const response = await fetch('/api/preferences', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preferences }),
+    await request('/api/location-preferences', {
+      method: 'PUT',
+      token: props.token,
+      body: { preferences },
     })
-    if (!response.ok) {
-      throw new Error(`Save failed (${response.status}).`)
-    }
     message.value = 'Preference saved.'
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) emit('expired')
     message.value = error instanceof Error
-      ? `${error.message} Make sure the Python preference server is running.`
-      : 'Could not save preference. Make sure the Python preference server is running.'
+      ? error.message
+      : 'Could not save preference. Please try again.'
   } finally {
     saving.value = false
   }
@@ -57,9 +59,7 @@ async function savePreferences() {
 
 onMounted(async () => {
   try {
-    const response = await fetch('/api/preferences')
-    if (!response.ok) throw new Error(`Load failed (${response.status}).`)
-    const { preferences } = await response.json()
+    const { preferences } = await request('/api/location-preferences', { token: props.token })
 
     for (const { id } of locations) ranks.value[id] = 'excluded'
     for (const { rank, location } of preferences) {
@@ -68,9 +68,10 @@ onMounted(async () => {
       }
     }
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) emit('expired')
     message.value = error instanceof Error
-      ? `${error.message} Make sure the Python preference server is running.`
-      : 'Could not load saved preference. Make sure the Python preference server is running.'
+      ? error.message
+      : 'Could not load saved preference. Please try again.'
   }
 })
 </script>

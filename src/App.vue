@@ -178,7 +178,7 @@ onMounted(restoreSession)
         </header>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
         <PreferencesForm :token="token" @expired="sessionExpired" />
-        <LocationPreference />
+        <LocationPreference :token="token" @expired="sessionExpired" />
         <div class="dining-planner">
           <h2>Daily Nutrition Preferences</h2>
           <p class="intro">Add only the nutrition goals you want considered in your dining recommendations.</p>

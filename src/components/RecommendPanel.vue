@@ -39,7 +39,7 @@ async function submit() {
     const [savedPreferences, nutritionGoals, locationRanks, priorityOrder] = await Promise.all([
       getPreferences(props.token),
       Promise.resolve(readNutritionGoals()),
-      readLocationRanks(),
+      readLocationRanks(props.token),
       Promise.resolve(readPriorityOrder()),
     ])
     const locations = LOCATIONS
