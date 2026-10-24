@@ -14,7 +14,7 @@ const DIETS = [
 ]
 const MAX_LIKES = 300
 
-const form = reactive({ ...DEFAULT_PREFERENCES, max_calories: '', min_protein: '' })
+const form = reactive({ ...DEFAULT_PREFERENCES })
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -22,23 +22,12 @@ const status = ref('')
 const likesLeft = computed(() => MAX_LIKES - form.likes.length)
 
 function fill(preferences) {
-  Object.assign(form, preferences, {
-    max_calories: preferences.max_calories ?? '',
-    min_protein: preferences.min_protein ?? '',
-  })
+  Object.assign(form, preferences)
 }
 
 function fail(cause) {
   if (cause instanceof ApiError && cause.status === 401) emit('expired')
   else error.value = cause.message
-}
-
-// Empty inputs mean "no goal"; anything else must be a whole number in range.
-function optionalInteger(value, min, max, label) {
-  if (value === '' || value === null || value === undefined) return null
-  const number = Number(value)
-  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${label} must be a whole number between ${min} and ${max}.`)
-  return number
 }
 
 async function load() {
@@ -57,20 +46,16 @@ async function save() {
   if (saving.value) return
   error.value = ''
   status.value = ''
-  let body
-  try {
-    body = {
-      vegetarian: form.vegetarian || form.vegan,
-      vegan: form.vegan,
-      gluten_free: form.gluten_free,
-      halal: form.halal,
-      max_calories: optionalInteger(form.max_calories, 50, 3000, 'Maximum calories'),
-      min_protein: optionalInteger(form.min_protein, 0, 200, 'Minimum protein'),
-      likes: form.likes.trim(),
-    }
-  } catch (cause) {
-    error.value = cause.message
-    return
+  const body = {
+    vegetarian: form.vegetarian || form.vegan,
+    vegan: form.vegan,
+    gluten_free: form.gluten_free,
+    halal: form.halal,
+    // Nutrition goals live in "Daily Nutrition Preferences"; clear any old
+    // per-dish limits so they can't keep filtering menus invisibly.
+    max_calories: null,
+    min_protein: null,
+    likes: form.likes.trim(),
   }
   saving.value = true
   try {
@@ -102,18 +87,6 @@ onMounted(load)
         </label>
         <p class="hint">Only dishes BU Dining labels this way will be recommended. Vegan includes vegetarian.</p>
       </fieldset>
-      <div class="field-row">
-        <div class="field">
-          <label for="max-calories">Max calories per dish</label>
-          <input id="max-calories" v-model="form.max_calories" type="number" inputmode="numeric" min="50" max="3000" step="1" placeholder="No limit" :disabled="saving" aria-describedby="max-calories-hint" />
-          <p id="max-calories-hint" class="hint">50–3000 kcal. Leave empty for no limit.</p>
-        </div>
-        <div class="field">
-          <label for="min-protein">Min protein per dish</label>
-          <input id="min-protein" v-model="form.min_protein" type="number" inputmode="numeric" min="0" max="200" step="1" placeholder="No minimum" :disabled="saving" aria-describedby="min-protein-hint" />
-          <p id="min-protein-hint" class="hint">0–200 g. Leave empty for no minimum.</p>
-        </div>
-      </div>
       <div class="field">
         <label for="likes">Foods you like</label>
         <textarea id="likes" v-model="form.likes" rows="3" :maxlength="MAX_LIKES" placeholder="e.g. spicy food, chicken, noodles, no mushrooms" :disabled="saving" aria-describedby="likes-hint"></textarea>

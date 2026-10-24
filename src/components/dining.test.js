@@ -29,12 +29,11 @@ describe('PreferencesForm', () => {
     const wrapper = mount(PreferencesForm, { props: { token: TOKEN } })
     await flushPromises()
     expect(wrapper.find('#likes').element.value).toBe('spicy chicken')
-    expect(wrapper.find('#max-calories').element.value).toBe('700')
+    expect(wrapper.find('#max-calories').exists()).toBe(false)
+    expect(wrapper.find('#min-protein').exists()).toBe(false)
     expect(wrapper.find('input[name="gluten_free"]').element.checked).toBe(true)
 
     await wrapper.find('input[name="vegan"]').setValue(true)
-    await wrapper.find('#max-calories').setValue('')
-    await wrapper.find('#min-protein').setValue('25')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
@@ -42,23 +41,17 @@ describe('PreferencesForm', () => {
     expect(url).toMatch(/\/api\/preferences$/)
     expect(init.method).toBe('PUT')
     expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`)
-    expect(JSON.parse(init.body)).toEqual({ ...SAVED, vegan: true, vegetarian: true, max_calories: null, min_protein: 25 })
+    expect(JSON.parse(init.body)).toEqual({ ...SAVED, vegan: true, vegetarian: true, max_calories: null, min_protein: null })
     expect(wrapper.find('[role="status"]').text()).toBe('Preferences saved.')
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
-  it('validates numbers locally and shows server errors', async () => {
-    const fetchMock = mockFetch((url, init) => init.method === 'PUT'
+  it('shows server errors', async () => {
+    mockFetch((url, init) => init.method === 'PUT'
       ? jsonResponse({ error: 'Food preferences must be 300 characters or fewer.' }, 400)
       : jsonResponse({ preferences: SAVED, updatedAt: 1 }))
     const wrapper = mount(PreferencesForm, { props: { token: TOKEN } })
     await flushPromises()
-    await wrapper.find('#max-calories').setValue('10')
-    await wrapper.find('form').trigger('submit')
-    expect(wrapper.find('[role="alert"]').text()).toBe('Maximum calories must be a whole number between 50 and 3000.')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    await wrapper.find('#max-calories').setValue('800')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toBe('Food preferences must be 300 characters or fewer.')
