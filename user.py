@@ -1,11 +1,11 @@
 LOCATION_PREFERENCES = [
     {
         "rank": 1,
-        "location": "west"
+        "location": "warren"
     },
     {
         "rank": 2,
-        "location": "warren"
+        "location": "west"
     },
     {
         "rank": 3,
