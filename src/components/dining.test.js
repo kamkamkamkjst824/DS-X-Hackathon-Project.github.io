@@ -190,8 +190,8 @@ describe('RecommendPanel', () => {
     expect(wrapper.text()).toContain('Nutrition goals (preference priority 1): none selected.')
   })
 
-  it('shows only the top 90 ranked recommendations', async () => {
-    const items = Array.from({ length: 91 }, (_, index) => diningItem({
+  it('shows only the top 40 ranked recommendations', async () => {
+    const items = Array.from({ length: 41 }, (_, index) => diningItem({
       id: `W${index + 1}`,
       name: `Chicken dish ${index + 1}`,
     }))
@@ -202,9 +202,9 @@ describe('RecommendPanel', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.findAll('.rec-card')).toHaveLength(90)
-    expect(wrapper.find('.rec-card:last-child .rec-rank').text()).toBe('90')
-    expect(wrapper.text()).not.toContain('Chicken dish 91')
+    expect(wrapper.findAll('.rec-card')).toHaveLength(40)
+    expect(wrapper.find('.rec-card:last-child .rec-rank').text()).toBe('40')
+    expect(wrapper.text()).not.toContain('Chicken dish 41')
   })
 
   it('hides "Now", removes dining hall controls, and requires a saved location', async () => {

@@ -8,7 +8,7 @@ import { NUTRITION_TOLERANCE, rankRecommendations, readLocationRanks, readNutrit
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['expired'])
 
-const MAX_RECOMMENDATIONS = 90
+const MAX_RECOMMENDATIONS = 40
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const dates = Array.from({ length: MAX_DAYS_AHEAD + 1 }, (_, offset) => {
   const value = diningDate(offset)
