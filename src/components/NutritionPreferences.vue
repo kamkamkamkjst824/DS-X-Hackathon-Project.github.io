@@ -1,110 +1,353 @@
+
 <script setup>
-import { reactive, ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
-// Field names match the normalized food dictionaries in dining_api.py.
-const fields = [
-  { key: 'calories', label: 'Calories', unit: 'kcal', step: '1', placeholder: '2000' },
-  { key: 'carbs', label: 'Carbohydrates', unit: 'g', step: '0.1', placeholder: '250' },
-  { key: 'protein', label: 'Protein', unit: 'g', step: '0.1', placeholder: '100' },
-  { key: 'saturated_fat', label: 'Saturated fat', unit: 'g', step: '0.1', placeholder: '20' },
-]
+// Nutrition preferences matching dining_api.py
+const calories = ref('')
+const carbs = ref('')
+const protein = ref('')
+const saturatedFat = ref('')
 
-const values = reactive({ calories: '', carbs: '', protein: '', saturated_fat: '' })
-const saving = ref(false)
 const message = ref('')
 const error = ref('')
-const emit = defineEmits(['saved'])
 
-async function savePreferences() {
+// Save preferences in the browser
+function savePreferences() {
   message.value = ''
   error.value = ''
-  const payload = {}
-  for (const field of fields) {
-    const raw = String(values[field.key]).trim()
-    if (raw === '') {
-      error.value = `Please enter ${field.label.toLowerCase()}.`
-      return
-    }
-    const number = Number(raw)
-    if (!Number.isFinite(number) || number < 0) {
-      error.value = `${field.label} must be a non-negative number.`
-      return
-    }
-    payload[field.key] = number
+
+  const fields = [
+    calories.value,
+    carbs.value,
+    protein.value,
+    saturatedFat.value
+  ]
+
+  // Check for empty inputs
+  if (fields.some(value => value === '' || value === null)) {
+    error.value = 'Please fill in all nutrition fields.'
+    return
   }
-  saving.value = true
+
+  const numbers = fields.map(Number)
+
+  // Validate nutrition inputs
+  if (numbers.some(value => !Number.isFinite(value) || value < 0)) {
+    error.value = 'Please enter valid, non-negative numbers.'
+    return
+  }
+
+  const preferences = {
+    calories: numbers[0],
+    carbs: numbers[1],
+    protein: numbers[2],
+    saturated_fat: numbers[3]
+  }
+
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/preferences', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    const result = await response.json()
-    if (!response.ok) throw new Error(result.error || 'Could not save preferences.')
-    message.value = 'Nutrition preferences saved!'
-    emit('saved', result.preferences)
-  } catch (err) {
-    error.value = err instanceof TypeError
-      ? 'Cannot reach the Python server. Start preferences_server.py on port 8000.'
-      : err.message
-  } finally {
-    saving.value = false
+    localStorage.setItem(
+      'nutritionPreferences',
+      JSON.stringify(preferences)
+    )
+
+    message.value = 'Nutrition preferences saved successfully!'
+  } catch {
+    error.value = 'Unable to save preferences in this browser.'
   }
 }
+
+// Load previously saved preferences
+function loadPreferences() {
+  try {
+    const saved = localStorage.getItem('nutritionPreferences')
+
+    if (!saved) return
+
+    const preferences = JSON.parse(saved)
+
+    calories.value = preferences.calories ?? ''
+    carbs.value = preferences.carbs ?? ''
+    protein.value = preferences.protein ?? ''
+    saturatedFat.value = preferences.saturated_fat ?? ''
+  } catch {
+    error.value = 'Unable to load saved preferences.'
+  }
+}
+
+// Reset preferences
+function resetPreferences() {
+  try {
+    localStorage.removeItem('nutritionPreferences')
+
+    calories.value = ''
+    carbs.value = ''
+    protein.value = ''
+    saturatedFat.value = ''
+
+    error.value = ''
+    message.value = 'Preferences have been reset.'
+  } catch {
+    error.value = 'Unable to reset preferences.'
+  }
+}
+
+// Automatically load when component appears
+onMounted(loadPreferences)
 </script>
 
 <template>
-  <section class="nutrition-panel" aria-labelledby="nutrition-heading">
-    <div class="panel-heading">
-      <span class="eyebrow">PERSONALIZE YOUR DAY</span>
-      <h2 id="nutrition-heading">Your nutrition goals</h2>
-      <p>Enter your preferred daily nutrition targets to help plan your meals.</p>
+  <div class="nutrition-container">
+    <div class="nutrition-header">
+      <h2>Daily Nutrition Preferences</h2>
+      <p>
+        Enter your preferred daily nutrition goals to help
+        personalize your dining recommendations.
+      </p>
     </div>
 
-    <form class="nutrition-form" @submit.prevent="savePreferences">
-      <div class="nutrition-fields">
-        <label v-for="field in fields" :key="field.key" class="nutrition-field">
-          <span class="field-label">{{ field.label }}</span>
-          <span class="input-wrap">
+    <form @submit.prevent="savePreferences">
+      <div class="nutrition-flexbox">
+
+        <!-- Calories -->
+        <div class="nutrition-field">
+          <label for="calories">Calories</label>
+          <div class="input-wrapper">
             <input
-              v-model="values[field.key]"
+              id="calories"
+              v-model="calories"
               type="number"
               min="0"
-              :step="field.step"
-              :placeholder="field.placeholder"
+              max="100000"
+              step="1"
+              placeholder="2000"
               required
             />
-            <span class="unit">{{ field.unit }}</span>
-          </span>
-        </label>
+            <span class="unit">kcal</span>
+          </div>
+        </div>
+
+        <!-- Carbohydrates -->
+        <div class="nutrition-field">
+          <label for="carbs">Carbohydrates</label>
+          <div class="input-wrapper">
+            <input
+              id="carbs"
+              v-model="carbs"
+              type="number"
+              min="0"
+              max="100000"
+              step="0.1"
+              placeholder="250"
+              required
+            />
+            <span class="unit">g</span>
+          </div>
+        </div>
+
+        <!-- Protein -->
+        <div class="nutrition-field">
+          <label for="protein">Protein</label>
+          <div class="input-wrapper">
+            <input
+              id="protein"
+              v-model="protein"
+              type="number"
+              min="0"
+              max="100000"
+              step="0.1"
+              placeholder="100"
+              required
+            />
+            <span class="unit">g</span>
+          </div>
+        </div>
+
+        <!-- Saturated Fat -->
+        <div class="nutrition-field">
+          <label for="saturated-fat">Saturated Fat</label>
+          <div class="input-wrapper">
+            <input
+              id="saturated-fat"
+              v-model="saturatedFat"
+              type="number"
+              min="0"
+              max="100000"
+              step="0.1"
+              placeholder="20"
+              required
+            />
+            <span class="unit">g</span>
+          </div>
+        </div>
+
       </div>
-      <p class="helper">These are goals, not medical recommendations. Values are stored by the local demo backend.</p>
-      <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
-      <p v-if="message" class="feedback success" role="status">{{ message }}</p>
-      <button type="submit" :disabled="saving">{{ saving ? 'Saving…' : 'Save preferences' }}</button>
+
+      <!-- Status messages -->
+      <p v-if="error" class="error-message" role="alert">
+        {{ error }}
+      </p>
+
+      <p v-if="message" class="success-message" role="status">
+        {{ message }}
+      </p>
+
+      <!-- Buttons -->
+      <div class="button-container">
+        <button type="submit" class="save-button">
+          Save Preferences
+        </button>
+
+        <button
+          type="button"
+          class="reset-button"
+          @click="resetPreferences"
+        >
+          Reset
+        </button>
+      </div>
     </form>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.nutrition-panel { box-sizing: border-box; width: min(100%, 760px); padding: 30px; border: 1px solid #eadfe0; border-radius: 20px; background: #fff; box-shadow: 0 12px 35px #39112010; color: #252329; font-family: Inter, system-ui, -apple-system, sans-serif; }
-.eyebrow { color: #ae1c32; font-size: 11px; font-weight: 800; letter-spacing: .15em; }
-.panel-heading h2 { margin: 10px 0 5px; font-size: clamp(24px, 4vw, 30px); letter-spacing: -.035em; }
-.panel-heading p { color: #68636b; margin: 0 0 25px; line-height: 1.5; }
-.nutrition-form { display: flex; flex-direction: column; gap: 15px; }
-.nutrition-fields { display: flex; flex-wrap: wrap; gap: 15px; }
-.nutrition-field { display: flex; flex: 1 1 220px; flex-direction: column; min-width: 0; gap: 8px; }
-.field-label { font-size: 13px; font-weight: 700; }
-.input-wrap { display: flex; align-items: center; background: #faf8f8; border: 1px solid #ded9db; border-radius: 10px; padding-right: 14px; }
-.input-wrap:focus-within { outline: 2px solid #b71932; outline-offset: 1px; }
-input { flex: 1; min-width: 0; width: 100%; border: 0; outline: none; background: transparent; padding: 14px; font: inherit; font-size: 16px; color: inherit; }
-.unit { font-size: 12px; color: #77717a; }
-.helper { margin: 0; font-size: 12px; color: #77717a; line-height: 1.5; }
-.feedback { margin: 0; font-size: 13px; }
-.error { color: #ae1c32; }
-.success { color: #17683a; }
-button { align-self: flex-start; border: 0; border-radius: 10px; background: #b71932; color: #fff; font: inherit; font-weight: 700; padding: 13px 22px; cursor: pointer; }
-button:disabled { opacity: .65; cursor: wait; }
-button:not(:disabled):hover { background: #8d1728; }
-@media (max-width: 480px) { .nutrition-panel { padding: 20px; } .nutrition-field { flex-basis: 100%; } button { align-self: stretch; } }
+.nutrition-container {
+  width: 100%;
+  max-width: 800px;
+  margin: 20px auto;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  color: #1f2937;
+}
+
+.nutrition-header {
+  margin-bottom: 24px;
+}
+
+.nutrition-header h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #b71932;
+  margin: 0 0 10px;
+}
+
+.nutrition-header p {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+/* Flexbox layout */
+.nutrition-flexbox {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.nutrition-field {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 220px;
+  min-width: 0;
+  gap: 8px;
+}
+
+.nutrition-field label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.input-wrapper:focus-within {
+  border-color: #b71932;
+  box-shadow: 0 0 0 2px rgba(183, 25, 50, 0.12);
+}
+
+.input-wrapper input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  font-size: 15px;
+  color: #111827;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.unit {
+  padding: 0 12px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.button-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.save-button,
+.reset-button {
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.save-button {
+  background: #b71932;
+  color: white;
+  border: 1px solid #b71932;
+}
+
+.save-button:hover {
+  background: #931329;
+}
+
+.reset-button {
+  background: white;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.reset-button:hover {
+  background: #f3f4f6;
+}
+
+.error-message {
+  color: #b91c1c;
+  margin-top: 16px;
+}
+
+.success-message {
+  color: #15803d;
+  margin-top: 16px;
+}
+
+@media (max-width: 480px) {
+  .nutrition-container {
+    padding: 16px;
+  }
+
+  .nutrition-field {
+    flex-basis: 100%;
+  }
+
+  .button-container button {
+    flex: 1;
+  }
+}
 </style>
