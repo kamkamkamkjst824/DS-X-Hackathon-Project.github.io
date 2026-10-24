@@ -4,6 +4,8 @@ import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, clearSession, readSession, saveSession } from './auth.js'
 import PreferencesForm from './components/PreferencesForm.vue'
 import RecommendPanel from './components/RecommendPanel.vue'
+import LocationPreference from './components/LocationPreference.vue'
+import NutritionPreferences from './components/NutritionPreferences.vue'
 
 const mode = ref('login')
 const email = ref('')
@@ -176,6 +178,12 @@ onMounted(restoreSession)
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
         <PreferencesForm :token="token" @expired="sessionExpired" />
         <RecommendPanel :token="token" @expired="sessionExpired" />
+        <LocationPreference />
+        <div class="dining-planner">
+          <h2>Welcome to Your Dining Planner!</h2>
+          <p class="intro">Enter your daily nutritional preferences below.</p>
+          <NutritionPreferences />
+        </div>
       </template>
 
       <!-- CONNECTION ERROR -->
@@ -297,3 +305,18 @@ onMounted(restoreSession)
     </section>
   </main>
 </template>
+
+<style scoped>
+.dining-planner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  margin: 24px 0;
+}
+
+.dining-planner h2 {
+  font-size: 1.5rem;
+  margin: 0;
+}
+</style>

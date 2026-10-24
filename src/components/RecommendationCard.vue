@@ -1,13 +1,12 @@
 <script setup>
 import { computed } from 'vue'
-import { DIET_LABELS } from '../dining.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
   rank: { type: Number, required: true },
 })
 
-const TAG_LABELS = { ...DIET_LABELS, cool_food: 'Cool Food' }
+const TAG_LABELS = { vegan: 'Vegan', vegetarian: 'Vegetarian', gluten_free: 'Gluten-free', halal: 'Halal', cool_food: 'Cool Food' }
 
 const tags = computed(() => {
   const active = Object.entries(TAG_LABELS).filter(([key]) => props.item.tags?.[key])
