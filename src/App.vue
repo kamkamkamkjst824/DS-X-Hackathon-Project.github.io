@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, clearSession, readSession, saveSession } from './auth.js'
+import LocationPreference from './components/LocationPreference.vue'
 
 const mode = ref('login')
 const email = ref('')
@@ -111,6 +112,7 @@ onMounted(restoreSession)
         <h1 id="page-title">Welcome back</h1>
         <p class="intro">You’re signed in to your campus account.</p>
         <div class="account"><span class="account-label">Your email</span><p>{{ user.email }}</p></div>
+        <LocationPreference />
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
         <button class="primary" :disabled="busy" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
       </template>
