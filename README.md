@@ -4,15 +4,18 @@ A minimal English sign-in and registration interface built with Vue 3, Vite, and
 
 ## Local Development
 
-Requires Node.js 22.12 or later. To use the local backend, follow its README to initialize the local D1 database and start the Worker. Then run these commands in the frontend project folder:
+Requires Node.js 22.12 or later. Development connects to the deployed Cloudflare API by default, so no local backend or environment file is needed. Run these commands in the frontend project folder:
 
 ```powershell
 npm ci
-Copy-Item .env.example .env.local
-npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The default API address is `http://127.0.0.1:8787`. To use another backend, set `VITE_API_BASE_URL` in `.env.local` to its origin, without the `/api/auth` suffix, and restart Vite.
+Open [http://localhost:5173](http://localhost:5173). The development server uses port 5173 and reports an error if that port is occupied instead of silently switching to a port the API does not allow.
+
+To use another backend, copy `.env.example` to `.env.local`, set `VITE_API_BASE_URL` to its origin without the `/api/auth` suffix, and restart Vite. For a local Worker, use `http://127.0.0.1:8787` and follow the backend README to initialize local D1 and start the Worker.
+
+If an existing `.env.local` points to `127.0.0.1:8787` while you intend to use the deployed backend, update it to `https://bu-auth-worker.tangyingkai120.workers.dev` and restart Vite. Local environment overrides still take precedence.
 
 ## Account Features
 
@@ -35,7 +38,7 @@ Set `VITE_API_BASE_URL` to the intended Worker origin before building. The backe
 
 The backend is deployed at [bu-auth-worker.tangyingkai120.workers.dev](https://bu-auth-worker.tangyingkai120.workers.dev). The tracked `.env.production` contains only this public API address, so production builds connect to the live database by default.
 
-On the current development machine, the Git-ignored `.env.local` also points to the live API. To switch back to the local backend, change its URL to `http://127.0.0.1:8787`. Other development environments can copy `.env.example` to configure the local API.
+The default API address in the frontend and `.env.example` also points to this live service, including when running `npm run dev`. The Git-ignored `.env.local` can override it for local backend development.
 
 For GitHub Pages deployment under the repository subpath, build with:
 

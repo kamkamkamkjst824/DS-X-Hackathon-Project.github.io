@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'bu-auth-session'
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8787').replace(/\/+$/, '')
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://bu-auth-worker.tangyingkai120.workers.dev').replace(/\/+$/, '')
 
 export class ApiError extends Error {
   constructor(message, status) {
