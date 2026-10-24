@@ -5,6 +5,13 @@ export const LOCATIONS = [
   { id: 'warren', name: 'Warren Towers' },
   { id: 'west', name: 'West Campus' },
 ]
+// Display labels for BU Dining's dietary flags, shared by the preferences form and recommendation cards.
+export const DIET_LABELS = Object.freeze({
+  vegetarian: 'Vegetarian',
+  vegan: 'Vegan',
+  gluten_free: 'Gluten-free',
+  halal: 'Halal',
+})
 export const MEALS = ['current', 'Breakfast', 'Brunch', 'Lunch', 'Dinner']
 // Must match MAX_DAYS_AHEAD in the Worker.
 export const MAX_DAYS_AHEAD = 6

@@ -1,17 +1,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ApiError } from '../api.js'
-import { DEFAULT_PREFERENCES, getPreferences, savePreferences } from '../dining.js'
+import { DEFAULT_PREFERENCES, DIET_LABELS, getPreferences, savePreferences } from '../dining.js'
 
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['expired', 'saved'])
 
-const DIETS = [
-  { key: 'vegetarian', label: 'Vegetarian' },
-  { key: 'vegan', label: 'Vegan' },
-  { key: 'gluten_free', label: 'Gluten-free' },
-  { key: 'halal', label: 'Halal' },
-]
+const DIETS = Object.entries(DIET_LABELS).map(([key, label]) => ({ key, label }))
 const MAX_LIKES = 300
 
 const form = reactive({ ...DEFAULT_PREFERENCES, max_calories: '', min_protein: '' })

@@ -88,16 +88,6 @@ textarea::placeholder { color: #9c9c9c; }
 .rec-allergy { color: #6b5300; }
 .rec-details a { color: var(--accent); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-
-/* Location preference (teammate component) */
-.location-preferences { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-.location-preferences h2 { margin: 0; font-size: 18px; font-weight: 600; }
-.location-preferences-intro { margin: 8px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
-.location-preference-field { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 12px; margin-top: 12px; }
-.location-preference-field label { margin: 0; }
-.location-preference-field select { width: 100%; height: 40px; padding: 0 9px; border: 1px solid #dcdcdc; border-radius: 7px; color: #202124; background: #fff; font-size: 14px; }
-.location-preferences .primary { margin-top: 18px; }
-.location-preferences-message { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
   .page { padding: 24px 16px; }
   .auth-card { padding: 28px 24px; border-radius: 12px; }
