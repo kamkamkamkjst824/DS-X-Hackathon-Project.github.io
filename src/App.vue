@@ -1,11 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, clearSession, readSession, saveSession } from './auth.js'
+import PreferencesForm from './components/PreferencesForm.vue'
+import RecommendPanel from './components/RecommendPanel.vue'
 
 const mode = ref('login')
 const email = ref('')
 const password = ref('')
 const user = ref(null)
+const token = ref('')
 const busy = ref(false)
 const checking = ref(true)
 const error = ref('')
@@ -26,6 +29,7 @@ async function restoreSession() {
     const session = readSession()
     if (!session) return
     const result = await api('/me', { token: session.token })
+    token.value = session.token
     user.value = result.user
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
@@ -63,6 +67,7 @@ async function submit() {
       await api('/logout', { method: 'POST', token: result.token }).catch(() => {})
       throw new Error('Unable to save your session. Please enable local storage and try again.')
     }
+    token.value = result.token
     user.value = result.user
     email.value = result.user.email
     password.value = ''
@@ -88,6 +93,7 @@ async function logout() {
     }
     clearSession()
     user.value = null
+    token.value = ''
     password.value = ''
   } catch (cause) {
     error.value = cause.message
@@ -96,23 +102,38 @@ async function logout() {
   }
 }
 
+// A dining request returned 401: the session is gone server-side.
+function sessionExpired() {
+  clearSession()
+  user.value = null
+  token.value = ''
+  password.value = ''
+  mode.value = 'login'
+  error.value = 'Your session has expired. Please sign in again.'
+}
+
 onMounted(restoreSession)
 </script>
 
 <template>
   <main class="page">
-    <section class="auth-card" aria-labelledby="page-title" :aria-busy="busy || checking">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">BU</span><span>CAMPUS ACCOUNT</span></div>
+    <section class="auth-card" :class="{ dashboard: user && !checking }" aria-labelledby="page-title" :aria-busy="busy || checking">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">BU</span><span>{{ user && !checking ? 'CAMPUS DINING' : 'CAMPUS ACCOUNT' }}</span></div>
       <template v-if="checking">
         <h1 id="page-title">Checking your session</h1>
         <p class="intro" role="status">Just a moment…</p>
       </template>
       <template v-else-if="user">
-        <h1 id="page-title">Welcome back</h1>
-        <p class="intro">You’re signed in to your campus account.</p>
-        <div class="account"><span class="account-label">Your email</span><p>{{ user.email }}</p></div>
+        <header class="dashboard-head">
+          <div>
+            <h1 id="page-title">What should you eat today?</h1>
+            <p class="intro">Signed in as {{ user.email }}</p>
+          </div>
+          <button class="secondary" type="button" :disabled="busy" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
+        </header>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
-        <button class="primary" :disabled="busy" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
+        <PreferencesForm :token="token" @expired="sessionExpired" />
+        <RecommendPanel :token="token" @expired="sessionExpired" />
       </template>
       <template v-else-if="needsRetry">
         <h1 id="page-title">Unable to connect</h1>
