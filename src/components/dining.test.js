@@ -190,6 +190,23 @@ describe('RecommendPanel', () => {
     expect(wrapper.text()).toContain('Nutrition goals (preference priority 1): none selected.')
   })
 
+  it('shows only the top 90 ranked recommendations', async () => {
+    const items = Array.from({ length: 91 }, (_, index) => diningItem({
+      id: `W${index + 1}`,
+      name: `Chicken dish ${index + 1}`,
+    }))
+    recommendFetch(url => jsonResponse(menuResponse('warren', items)), [
+      { rank: 1, location: 'warren' },
+    ])
+    const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.rec-card')).toHaveLength(90)
+    expect(wrapper.find('.rec-card:last-child .rec-rank').text()).toBe('90')
+    expect(wrapper.text()).not.toContain('Chicken dish 91')
+  })
+
   it('hides "Now", removes dining hall controls, and requires a saved location', async () => {
     const fetchMock = recommendFetch(() => jsonResponse(RESULT), [])
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })

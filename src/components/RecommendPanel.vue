@@ -8,6 +8,7 @@ import { NUTRITION_TOLERANCE, rankRecommendations, readLocationRanks, readNutrit
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['expired'])
 
+const MAX_RECOMMENDATIONS = 90
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const dates = Array.from({ length: MAX_DAYS_AHEAD + 1 }, (_, offset) => {
   const value = diningDate(offset)
@@ -100,7 +101,7 @@ async function submit() {
 
     result.value = {
       ...response,
-      recommendations: ranked.recommendations,
+      recommendations: ranked.recommendations.slice(0, MAX_RECOMMENDATIONS),
       best_location: topDish?.location || null,
       summary: topDish
         ? `Top match: ${topDish.name} at ${topDish.location.name}.`
