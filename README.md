@@ -27,6 +27,20 @@ If an existing `.env.local` points to `127.0.0.1:8787` while you intend to use t
 
 Email ownership verification, password resets, and profile management are outside the current feature set.
 
+## Location Preference
+
+After signing in, users can rank Warren Towers, West Campus, and Marciano Commons from 1 to 3. Saving sends the ranking to the local Python preference server, which writes it to `user.py`; the app loads the saved ranks when reopened.
+
+For local testing, start the Python server in one terminal:
+
+```sh
+python3 preference_server.py
+```
+
+Then start Vite in another terminal with `npm run dev` and open `http://localhost:5173`. Vite proxies `/api/preferences` to the Python server on port 8000.
+
+The Python prototype writes all preferences to one shared local `user.py`, replacing the previous ranking on each save. It is not per-account storage, does not support concurrent users, and is not available on static GitHub Pages. A deployed multi-user version needs an authenticated backend and per-user database records.
+
 ## Build and Deployment
 
 ```powershell
