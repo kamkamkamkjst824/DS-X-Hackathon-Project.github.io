@@ -1,4 +1,4 @@
-import { request } from './api.js'
+import { ApiError, request } from './api.js'
 
 export const LOCATIONS = [
   { id: 'marciano', name: 'Marciano Commons' },
@@ -27,32 +27,12 @@ export function savePreferences(token, preferences) {
   return request('/api/preferences', { method: 'PUT', token, body: preferences })
 }
 
-export async function getDiningMenus({ date, meal, locations }) {
+export async function getDiningMenus({ date, meal, locations, token }) {
   const results = await Promise.allSettled(locations.map(async location => {
     const query = new URLSearchParams({ day: date })
-    let response
-    try {
-      response = await fetch(`/api/v1/dining/locations/${encodeURIComponent(location)}/menu?${query}`, {
-        signal: AbortSignal.timeout(30000),
-        cache: 'no-store',
-      })
-    } catch (cause) {
-      if (cause?.name === 'TimeoutError') throw new Error(`${location}: menu request timed out.`)
-      throw new Error(`${location}: unable to connect to BU Dining API.`)
-    }
-
-    let menu
-    try {
-      menu = await response.json()
-    } catch {
-      throw new Error(`${location}: BU Dining API returned an invalid response.`)
-    }
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('BU Dining API authentication failed. Set a valid BU_API_KEY in .env.local and restart Vite.')
-      }
-      throw new Error(menu.detail || menu.error || `${location}: BU Dining API request failed (${response.status}).`)
-    }
+    const menu = await request(`/api/v1/dining/locations/${encodeURIComponent(location)}/menu?${query}`, {
+      token, timeout: 30000,
+    })
     if (!Array.isArray(menu.meals)) {
       throw new Error(`${location}: BU Dining API returned an unexpected menu format.`)
     }
@@ -93,12 +73,16 @@ export async function getDiningMenus({ date, meal, locations }) {
     return { location: menu.location, items, stale: menu.stale, sourceUrl: menu.source_url }
   }))
 
+  const expired = results.find(result => result.status === 'rejected'
+    && result.reason instanceof ApiError && result.reason.status === 401)
+  if (expired) throw expired.reason
+
   const menus = results.flatMap((result, index) => result.status === 'fulfilled'
     ? [result.value]
     : [{ error: result.reason instanceof Error ? result.reason.message : `${locations[index]}: menu unavailable.` }])
   const availableMenus = menus.filter(menu => !menu.error)
   if (availableMenus.length === 0) {
-    throw new Error(menus.map(menu => menu.error).join(' '))
+    throw new Error([...new Set(menus.map(menu => menu.error))].join(' '))
   }
 
   return {

@@ -50,6 +50,7 @@ async function submit() {
     }
 
     const response = await getDiningMenus({
+      token: props.token,
       date: date.value,
       meal: meal.value,
       locations,

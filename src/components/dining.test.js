@@ -160,7 +160,7 @@ describe('RecommendPanel', () => {
   it('requests menus from BU Dining, ranks dishes and renders results', async () => {
     const fetchMock = recommendFetch(url => {
       const location = url.includes('/marciano/') ? 'marciano' : 'warren'
-      if (location === 'marciano') return jsonResponse({ detail: 'Marciano Commons menu is unavailable right now.' }, 502)
+      if (location === 'marciano') return jsonResponse({ error: 'Marciano Commons menu is unavailable right now.' }, 502)
       return jsonResponse(menuResponse(location, [diningItem()]))
     }, [
       { rank: 1, location: 'warren' },
@@ -242,7 +242,7 @@ describe('RecommendPanel', () => {
     let status = 200
     recommendFetch(url => {
       const location = url.includes('/marciano/') ? 'marciano' : url.includes('/warren/') ? 'warren' : 'west'
-      return jsonResponse(status === 200 ? menuResponse(location, items) : { detail: 'Dining API unavailable.' }, status)
+      return jsonResponse(status === 200 ? menuResponse(location, items) : { error: 'Dining API unavailable.' }, status)
     })
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')

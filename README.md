@@ -4,7 +4,7 @@ A minimal English sign-in and registration interface built with Vue 3, Vite, and
 
 ## Local Development
 
-Requires Node.js 22.12 or later. Development connects to the deployed Cloudflare account API and the BU Dining API. Copy `.env.example` to `.env.local`, set `BU_API_KEY` to a rotated BU API key, then run these commands in the frontend project folder:
+Requires Node.js 22.12 or later. Development connects to the deployed Cloudflare account API and the BU Dining API. Copy `.env.example` to `.env.local`, then run these commands in the frontend project folder:
 
 ```powershell
 cp .env.example .env.local
@@ -14,7 +14,7 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173). The development server uses port 5173 and reports an error if that port is occupied instead of silently switching to a port the API does not allow.
 
-The Vite development server proxies `/api/v1/dining` to `public.api-nonprod.bu.edu` and adds `BU_API_KEY` server-side. The key is not sent to browser JavaScript. Never commit `.env.local` or put the key in a `VITE_` variable. Restart Vite after changing local environment values. Production hosting needs an authenticated server-side proxy for these endpoints; do not build the key into a static frontend.
+Dining menu requests go to the Cloudflare Worker configured by `VITE_API_BASE_URL`, with the signed-in session token. The Worker validates requests and adds its `BU_API_KEY` secret when contacting BU. No BU key belongs in the frontend environment or browser bundle. For a local Worker, configure the key in `Cloudflare_Part/.dev.vars`; for production, use `wrangler secret put BU_API_KEY`.
 
 To use another backend, copy `.env.example` to `.env.local`, set `VITE_API_BASE_URL` to its origin without the `/api/auth` suffix, and restart Vite. For a local Worker, use `http://127.0.0.1:8787` and follow the backend README to initialize local D1 and start the Worker.
 
@@ -64,10 +64,16 @@ The default API address in the frontend and `.env.example` also points to this l
 For GitHub Pages deployment under the repository subpath, build with:
 
 ```powershell
-npm run build -- --base=/DS-X-Hackathon-Project.github.io/
+npm run build:pages
 ```
 
 Use the standard build command when deploying at a site's root. The page does not require client-side routing.
+
+### GitHub Pages setup
+
+In the GitHub repository, open **Settings → Pages → Build and deployment** and set **Source** to **GitHub Actions**. Push these changes to `main`. The `Deploy to GitHub Pages` workflow installs dependencies, builds with the repository subpath, and uploads only `dist`. Future pushes to `main` deploy automatically; you can also run it manually from the Actions tab.
+
+The deployed URL is https://kamkamkamkjst824.github.io/DS-X-Hackathon-Project.github.io/ . Do not publish the source repository root directly: its `index.html` references `/src/main.js`, which requires Vite compilation and will not run as a static Pages site.
 
 ## Verification
 

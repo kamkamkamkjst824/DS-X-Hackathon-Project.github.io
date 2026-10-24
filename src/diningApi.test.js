@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getDiningMenus } from './dining.js'
+import { API_BASE } from './api.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -42,12 +43,16 @@ describe('getDiningMenus', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await getDiningMenus({
+      token: 'session-token',
       date: '2026-10-24',
       meal: 'current',
       locations: ['warren'],
     })
 
     expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/dining/locations/warren/menu?day=2026-10-24')
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/api/v1/dining/locations/warren/menu?day=2026-10-24`)
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer session-token')
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-api-key')
     expect(result.recommendations[0]).toMatchObject({
       item_id: 'item-1',
       name: 'Veggie Bowl',
@@ -66,7 +71,7 @@ describe('getDiningMenus', () => {
 
   it('keeps available menus when one location request fails', async () => {
     const fetchMock = vi.fn(url => String(url).includes('/west/')
-      ? Promise.resolve(new Response(JSON.stringify({ detail: 'Unavailable' }), { status: 503 }))
+      ? Promise.resolve(new Response(JSON.stringify({ error: 'Unavailable' }), { status: 503 }))
       : Promise.resolve(new Response(JSON.stringify(menu('warren', [])), { status: 200 })))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -80,7 +85,7 @@ describe('getDiningMenus', () => {
     expect(result.warnings).toEqual(['Unavailable'])
   })
 
-  it('explains when the BU API key is missing or rejected', async () => {
+  it('preserves session expiry so the UI can request sign-in', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({ message: 'Missing API key in request' }), { status: 401 })
     )))
@@ -89,6 +94,14 @@ describe('getDiningMenus', () => {
       date: '2026-10-24',
       meal: 'Lunch',
       locations: ['warren'],
-    })).rejects.toThrow('Set a valid BU_API_KEY in .env.local')
+    })).rejects.toMatchObject({ status: 401 })
+  })
+
+  it('shows an upstream failure once when all locations fail', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({ error: 'Dining service unavailable.' }), { status: 502 })
+    )))
+    await expect(getDiningMenus({ date: '2026-10-24', meal: 'Lunch', locations: ['warren', 'west', 'marciano'] }))
+      .rejects.toThrow(/^Dining service unavailable\.$/)
   })
 })
