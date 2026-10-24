@@ -82,7 +82,7 @@ onMounted(async () => {
           required
           @change="message = ''"
         >
-          <option value="" disabled>Select rank</option>
+          <option value="">Select rank</option>
           <option
             v-for="rank in [1, 2, 3]"
             :key="rank"
