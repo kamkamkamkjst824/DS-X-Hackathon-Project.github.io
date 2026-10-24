@@ -4,14 +4,17 @@ A minimal English sign-in and registration interface built with Vue 3, Vite, and
 
 ## Local Development
 
-Requires Node.js 22.12 or later. Development connects to the deployed Cloudflare API by default, so no local backend or environment file is needed. Run these commands in the frontend project folder:
+Requires Node.js 22.12 or later. Development connects to the deployed Cloudflare account API and the BU Dining API. Copy `.env.example` to `.env.local`, set `BU_API_KEY` to a rotated BU API key, then run these commands in the frontend project folder:
 
 ```powershell
+cp .env.example .env.local
 npm ci
 npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173). The development server uses port 5173 and reports an error if that port is occupied instead of silently switching to a port the API does not allow.
+
+The Vite development server proxies `/api/v1/dining` to `public.api-nonprod.bu.edu` and adds `BU_API_KEY` server-side. The key is not sent to browser JavaScript. Never commit `.env.local` or put the key in a `VITE_` variable. Restart Vite after changing local environment values. Production hosting needs an authenticated server-side proxy for these endpoints; do not build the key into a static frontend.
 
 To use another backend, copy `.env.example` to `.env.local`, set `VITE_API_BASE_URL` to its origin without the `/api/auth` suffix, and restart Vite. For a local Worker, use `http://127.0.0.1:8787` and follow the backend README to initialize local D1 and start the Worker.
 
@@ -27,11 +30,15 @@ If an existing `.env.local` points to `127.0.0.1:8787` while you intend to use t
 
 Email ownership verification, password resets, and profile management are outside the current feature set.
 
-## Location Preference
+## Dining recommendations
 
-After signing in, users can rank Warren Towers, West Campus, and Marciano Commons from 1 to 3. Saving sends the ranking to the local Python preference server, which writes it to `user.py`; the app loads the saved ranks when reopened.
+After signing in, users can set required dietary needs, enter food keywords they like, add optional nutrition goals, and rank the dining locations they want included from 1 to 3. Choosing "Don't want" excludes a location from both menu requests and recommendations. Users can also choose the relative priority of food keywords, location, and nutrition goals. Dietary needs always remain strict filters before those ranking priorities are applied.
 
-For local testing, start the Python server in one terminal:
+When ranking by nutrition, dishes with more selected nutrition goals within ±25% rank higher, followed by closeness to those goals. Food-name keyword matches and saved location ranks are compared according to the user's selected priority order. Missing food keywords are reported without penalizing remaining dishes.
+
+Menus and item nutrition/dietary labels come from the BU Dining API's `/api/v1/dining/locations/{location}/menu` endpoint. Nutrition goals not explicitly added are ignored. If a selected nutrition field is missing from the menu data, that dish cannot match that goal.
+
+For local testing, start the Python location-preference server in one terminal:
 
 ```sh
 python3 preference_server.py
@@ -39,7 +46,7 @@ python3 preference_server.py
 
 Then start Vite in another terminal with `npm run dev` and open `http://localhost:5173`. Vite proxies `/api/preferences` to the Python server on port 8000.
 
-The Python prototype writes all preferences to one shared local `user.py`, replacing the previous ranking on each save. It is not per-account storage, does not support concurrent users, and is not available on static GitHub Pages. A deployed multi-user version needs an authenticated backend and per-user database records.
+The Python prototype writes location preferences to one shared local `user.py`, replacing the previous ranking on each save. It is not per-account storage, does not support concurrent users, and is not available on static GitHub Pages. A deployed version needs a secure server-side proxy for the BU API key and authenticated per-user location preferences; never build the key into a static frontend.
 
 ## Build and Deployment
 

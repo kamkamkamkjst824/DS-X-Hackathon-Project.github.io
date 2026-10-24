@@ -15,17 +15,23 @@ const ranks = ref({
 const message = ref('')
 const saving = ref(false)
 
-const complete = computed(() => Object.values(ranks.value).every(Boolean))
-const uniqueRanks = computed(() => new Set(Object.values(ranks.value)).size === locations.length)
+const rankedLocations = computed(() => Object.entries(ranks.value)
+  .filter(([, rank]) => rank !== '' && rank !== 'excluded'))
+const uniqueRanks = computed(() => {
+  const selectedRanks = rankedLocations.value.map(([, rank]) => Number(rank))
+  return new Set(selectedRanks).size === selectedRanks.length
+})
 
 async function savePreferences() {
-  if (!complete.value || !uniqueRanks.value) {
-    message.value = 'Choose each rank from 1 to 3 exactly once.'
+  if (!rankedLocations.value.length || !uniqueRanks.value) {
+    message.value = rankedLocations.value.length
+      ? 'Each included location must have a unique rank from 1 to 3.'
+      : 'Choose at least one location to include in recommendations.'
     return
   }
 
-  const preferences = locations
-    .map(({ id }) => ({ rank: Number(ranks.value[id]), location: id }))
+  const preferences = rankedLocations.value
+    .map(([location, rank]) => ({ rank: Number(rank), location }))
     .sort((first, second) => first.rank - second.rank)
   saving.value = true
   message.value = ''
@@ -55,6 +61,7 @@ onMounted(async () => {
     if (!response.ok) throw new Error(`Load failed (${response.status}).`)
     const { preferences } = await response.json()
 
+    for (const { id } of locations) ranks.value[id] = 'excluded'
     for (const { rank, location } of preferences) {
       if (Object.hasOwn(ranks.value, location) && [1, 2, 3].includes(rank)) {
         ranks.value[location] = String(rank)
@@ -71,7 +78,7 @@ onMounted(async () => {
 <template>
   <section class="location-preferences" aria-labelledby="location-preferences-title">
     <h2 id="location-preferences-title">Location preference</h2>
-    <p class="location-preferences-intro">Rank Warren, West, and Marciano from 1 (top choice) to 3.</p>
+    <p class="location-preferences-intro">Rank locations you want included. Choose “Don't want” to exclude a location from recommendations.</p>
 
     <form @submit.prevent="savePreferences">
       <div v-for="location in locations" :key="location.id" class="location-preference-field">
@@ -79,18 +86,18 @@ onMounted(async () => {
         <select
           :id="`preference-${location.id}`"
           v-model="ranks[location.id]"
-          required
           @change="message = ''"
         >
-          <option value="">Select rank</option>
+          <option value="">Choose preference</option>
           <option
             v-for="rank in [1, 2, 3]"
             :key="rank"
             :value="rank"
-            :disabled="Object.entries(ranks).some(([id, selected]) => id !== location.id && selected === rank)"
+            :disabled="Object.entries(ranks).some(([id, selected]) => id !== location.id && Number(selected) === rank)"
           >
             {{ rank }}
           </option>
+          <option value="excluded">Don't want</option>
         </select>
       </div>
 

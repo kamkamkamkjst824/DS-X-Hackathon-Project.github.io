@@ -21,8 +21,8 @@ def validate_preferences(preferences, allow_empty=False):
     if allow_empty and preferences == []:
         return preferences
 
-    if not isinstance(preferences, list) or len(preferences) != 3:
-        raise ValueError("Provide one rank for each of the three dining locations.")
+    if not isinstance(preferences, list) or not 1 <= len(preferences) <= len(LOCATION_IDS):
+        raise ValueError("Provide between one and three ranked dining locations.")
 
     if any(
         not isinstance(item, dict)
@@ -34,11 +34,13 @@ def validate_preferences(preferences, allow_empty=False):
     ):
         raise ValueError("Preference entries must contain a valid rank and location.")
 
-    if {item["rank"] for item in preferences} != {1, 2, 3}:
+    ranks = [item["rank"] for item in preferences]
+    if len(set(ranks)) != len(ranks) or any(rank not in {1, 2, 3} for rank in ranks):
         raise ValueError("Ranks must be unique and range from 1 to 3.")
 
-    if {item["location"] for item in preferences} != LOCATION_IDS:
-        raise ValueError("Choose Warren, West, and Marciano exactly once.")
+    selected_locations = [item["location"] for item in preferences]
+    if len(set(selected_locations)) != len(selected_locations):
+        raise ValueError("Each dining location can only be included once.")
 
     return sorted(preferences, key=lambda item: item["rank"])
 
@@ -103,7 +105,7 @@ class PreferenceHandler(BaseHTTPRequestHandler):
 
         try:
             payload = json.loads(self.rfile.read(content_length))
-            preferences = validate_preferences(payload.get("preferences"))
+            preferences = validate_preferences(payload.get("preferences"), allow_empty=True)
         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError, ValueError) as error:
             self.send_json(400, {"error": f"Invalid preferences: {error}"})
             return

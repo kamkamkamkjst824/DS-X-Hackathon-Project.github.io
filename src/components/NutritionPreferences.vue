@@ -101,13 +101,6 @@ onMounted(loadPreferences)
 
 <template>
   <div class="nutrition-container">
-    <div class="nutrition-header">
-      <h2>Daily Nutrition Preferences</h2>
-      <p>
-        Add only the nutrition goals you want considered in your dining recommendations.
-      </p>
-    </div>
-
     <form @submit.prevent="savePreferences">
       <div v-if="entries.length" class="nutrition-flexbox">
         <div v-for="entry in entries" :key="entry.id" class="nutrition-entry">
@@ -199,23 +192,6 @@ onMounted(loadPreferences)
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   color: #1f2937;
-}
-
-.nutrition-header {
-  margin-bottom: 24px;
-}
-
-.nutrition-header h2 {
-  font-size: 24px;
-  font-weight: 700;
-  color: #b71932;
-  margin: 0 0 10px;
-}
-
-.nutrition-header p {
-  font-size: 14px;
-  color: #6b7280;
-  line-height: 1.6;
 }
 
 /* Flexbox layout */

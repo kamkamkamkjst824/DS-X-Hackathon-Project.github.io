@@ -1,17 +1,25 @@
 import vue from '@vitejs/plugin-vue'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 
-export default defineConfig({
-  plugins: [vue()],
-  server: {
-    port: 5174,
-    strictPort: true,
-    proxy: {
-      '/api/preferences': 'http://127.0.0.1:8000',
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  return {
+    plugins: [vue()],
+    server: {
+      port: 5173,
+      strictPort: true,
+      proxy: {
+        '/api/preferences': 'http://127.0.0.1:8000',
+        '/api/v1/dining': {
+          target: 'https://public.api-nonprod.bu.edu',
+          changeOrigin: true,
+          headers: env.BU_API_KEY ? { 'x-api-key': env.BU_API_KEY } : {},
+        },
+      },
     },
-  },
-  test: {
-    environment: 'jsdom',
-    include: ['src/**/*.test.js'],
-  },
+    test: {
+      environment: 'jsdom',
+      include: ['src/**/*.test.js'],
+    },
+  }
 })

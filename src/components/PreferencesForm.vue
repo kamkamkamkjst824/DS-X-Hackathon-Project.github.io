@@ -75,23 +75,27 @@ onMounted(load)
 
 <template>
   <section class="panel" aria-labelledby="preferences-title" :aria-busy="loading || saving">
-    <h2 id="preferences-title">Your food preferences</h2>
-    <p class="intro">We use these to filter menus and personalize recommendations.</p>
+    <h2 id="preferences-title">Dietary needs</h2>
+    <p class="intro">Selected dietary labels are required: dishes without every selected label are excluded.</p>
     <p v-if="loading" class="intro" role="status">Loading your preferences…</p>
     <form v-else novalidate @submit.prevent="save">
       <fieldset class="choices">
-        <legend>Dietary needs</legend>
+        <legend>Select all that apply</legend>
         <label v-for="diet in DIETS" :key="diet.key" class="check">
           <input v-model="form[diet.key]" type="checkbox" :name="diet.key" :disabled="saving || (diet.key === 'vegetarian' && form.vegan)" />
           <span>{{ diet.label }}</span>
         </label>
         <p class="hint">Only dishes BU Dining labels this way will be recommended. Vegan includes vegetarian.</p>
       </fieldset>
-      <div class="field">
-        <label for="likes">Foods you like</label>
-        <textarea id="likes" v-model="form.likes" rows="3" :maxlength="MAX_LIKES" placeholder="e.g. spicy food, chicken, noodles, no mushrooms" :disabled="saving" aria-describedby="likes-hint"></textarea>
-        <p id="likes-hint" class="hint">{{ likesLeft }} characters left. Written in English works best.</p>
-      </div>
+      <section class="preference-subsection" aria-labelledby="food-preferences-title">
+        <h2 id="food-preferences-title">Your food preferences</h2>
+        <p class="intro">Enter food names or keywords you like. These influence ranking, but do not filter dishes out.</p>
+        <div class="field">
+          <label for="likes">Foods or keywords you like</label>
+          <textarea id="likes" v-model="form.likes" rows="3" :maxlength="MAX_LIKES" placeholder="e.g. spicy food, chicken, noodles" :disabled="saving" aria-describedby="likes-hint"></textarea>
+          <p id="likes-hint" class="hint">{{ likesLeft }} characters left. Separate keywords with commas. Written in English works best.</p>
+        </div>
+      </section>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>
       <p v-if="status" class="success" role="status">{{ status }}</p>
       <button class="primary" type="submit" :disabled="saving">{{ saving ? 'Saving…' : 'Save preferences' }}</button>

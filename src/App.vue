@@ -6,10 +6,7 @@ import PreferencesForm from './components/PreferencesForm.vue'
 import RecommendPanel from './components/RecommendPanel.vue'
 import LocationPreference from './components/LocationPreference.vue'
 import NutritionPreferences from './components/NutritionPreferences.vue'
-
-// The recommendation panel is temporarily hidden from the UI. The component,
-// API calls and backend endpoint are unchanged; set this to true to show it again.
-const SHOW_RECOMMENDATIONS = false
+import RecommendationPriorities from './components/RecommendationPriorities.vue'
 
 const mode = ref('login')
 const email = ref('')
@@ -181,13 +178,14 @@ onMounted(restoreSession)
         </header>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
         <PreferencesForm :token="token" @expired="sessionExpired" />
-        <RecommendPanel v-if="SHOW_RECOMMENDATIONS" :token="token" @expired="sessionExpired" />
         <LocationPreference />
         <div class="dining-planner">
-          <h2>Welcome to Your Dining Planner!</h2>
-          <p class="intro">Enter your daily nutritional preferences below.</p>
+          <h2>Daily Nutrition Preferences</h2>
+          <p class="intro">Add only the nutrition goals you want considered in your dining recommendations.</p>
           <NutritionPreferences />
         </div>
+        <RecommendationPriorities />
+        <RecommendPanel :token="token" @expired="sessionExpired" />
       </template>
 
       <!-- CONNECTION ERROR -->
