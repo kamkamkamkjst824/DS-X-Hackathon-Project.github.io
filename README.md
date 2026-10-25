@@ -46,6 +46,19 @@ The browser sends the user's session token to the Worker, which adds its BU API 
 
 ## How a recommendation is generated
 
+### Hybrid recommendation model
+
+The current system combines **rule-based filtering, weighted scoring, and LLM selection**. It has not removed all rule-based recommendation logic:
+
+- **Rules determine eligibility:** required dietary labels and excluded dining halls are applied before scoring. Selected menu stations are also excluded.
+- **Deterministic scores create the shortlist:** nutrition target matching, food keyword matching, and location ranks produce a weighted score. The top 20 candidates are sent to Workers AI.
+- **The LLM makes the final selection:** it receives user preferences, candidate scores, and effective weights, and selects up to five dishes with reasons. It can only choose from the supplied shortlist; it cannot recommend a filtered-out dish or one outside the top 20, or change the scoring weights.
+- **Weighted scores provide a fallback:** if AI is unavailable, times out, or produces unusable output, the Worker returns the highest-scoring dishes. If AI selects fewer than five valid dishes, weighted picks fill the remaining places when candidates are available.
+
+The former frontend priority-by-priority comparison (compare priority 1, then priority 2 only for ties, then priority 3) has been removed from the main recommendation flow. Hard filters, numerical scoring, and deterministic fallback remain part of the current design. Food keyword scoring is still text matching rather than semantic matching by the LLM.
+
+### Request flow
+
 1. `src/main.js` mounts `App.vue`. The app reads the saved browser session and validates it through the Worker's `/api/auth/me` endpoint.
 2. The app shows registration/sign-in when there is no valid session, or the preference and recommendation panels after successful authentication.
 3. The user edits dietary needs, food keywords, location rankings, nutrition targets for one dish, and ranking priorities. There are no separate save buttons on the main page.
