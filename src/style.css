@@ -57,6 +57,11 @@ h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.4; font-weight: 600; lette
 .priority-field { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 16px; }
 .priority-field label { margin: 0; }
 .priority-field .hint { margin-top: 4px; }
+.advanced-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.advanced-toggle input { width: 18px; height: 18px; padding: 0; accent-color: var(--accent); }
+.advanced-weights { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #fafafa; }
+.advanced-weights .priority-field { grid-template-columns: 1fr minmax(120px, 220px); }
+.advanced-weights input[type="range"] { width: 100%; accent-color: var(--accent); }
 .choices { margin: 0 0 21px; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .choices legend { padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 600; }
 .choices .hint { flex-basis: 100%; margin-top: 0; }
@@ -87,6 +92,7 @@ textarea::placeholder { color: #9c9c9c; }
 .rec-where { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .rec-reason { margin: 12px 0 0; font-size: 14px; line-height: 1.7; }
 .rec-description { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.rec-score { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 .rec-nutrition { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
 .rec-nutrition div { padding: 6px 10px; border-radius: 6px; background: #f5f5f5; }
 .rec-nutrition dt { color: var(--muted); font-size: 11px; }

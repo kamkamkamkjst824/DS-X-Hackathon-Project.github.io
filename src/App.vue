@@ -184,7 +184,7 @@ onMounted(restoreSession)
           <p class="intro">Add only the nutrition goals you want considered in your dining recommendations.</p>
           <NutritionPreferences :token="token" @expired="sessionExpired" />
         </div>
-        <RecommendationPriorities />
+        <RecommendationPriorities :token="token" @expired="sessionExpired" />
         <RecommendPanel :token="token" @expired="sessionExpired" />
       </template>
 

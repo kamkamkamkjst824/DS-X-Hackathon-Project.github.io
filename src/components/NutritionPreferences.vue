@@ -18,6 +18,7 @@ const nutrients = [
   { key: 'saturated_fat', label: 'Saturated Fat', unit: 'g', step: '0.1' },
 ]
 const entries = ref([])
+const goalScope = ref('daily')
 const availableNutrients = computed(() => nutrients.filter(
   nutrient => !entries.value.some(entry => entry.key === nutrient.key)
 ))
@@ -43,7 +44,7 @@ function handleError(cause, fallback) {
 async function putGoals(goals) {
   saving.value = true
   try {
-    await request(PATH, { method: 'PUT', token: props.token, body: { goals } })
+    await request(PATH, { method: 'PUT', token: props.token, body: { goals, goal_scope: goalScope.value } })
     return true
   } finally {
     saving.value = false
@@ -82,7 +83,8 @@ async function savePreferences() {
 
 async function loadPreferences() {
   try {
-    const { goals } = await request(PATH, { token: props.token })
+    const { goals, goalScope: savedScope = 'daily' } = await request(PATH, { token: props.token })
+    goalScope.value = savedScope
     if (!goals || typeof goals !== 'object' || Array.isArray(goals)) {
       throw new Error('Saved nutrition preferences have an unexpected format.')
     }
@@ -159,6 +161,14 @@ onMounted(loadPreferences)
             Remove
           </button>
         </div>
+      </div>
+
+      <div class="nutrition-field scope-field">
+        <label for="nutrition-scope">Goal scope</label>
+        <select id="nutrition-scope" v-model="goalScope">
+          <option value="daily">Daily target (not used for single-dish ranking)</option>
+          <option value="per-serving">Per-serving target (used for single-dish ranking)</option>
+        </select>
       </div>
 
       <button

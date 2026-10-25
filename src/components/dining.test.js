@@ -147,11 +147,13 @@ const RESULT = {
   date: '2026-10-24', meal: 'current', fallback: false, model: 'workers-ai',
   best_location: { id: 'warren', name: 'Warren Towers' },
   summary: 'Head to Warren Towers for curry.',
+  score_weights: { nutrition: 0, food: 63.6, location: 36.4 },
   warnings: ['Marciano Commons menu is unavailable right now.'],
   locations: [],
   recommendations: [{
     item_id: 'W1', name: 'Chicken Tikka Masala', description: 'Spiced chicken', location: { id: 'warren', name: 'Warren Towers' },
-    meal: 'Lunch', station: 'International', reason: 'Spiced chicken you will love.',
+    meal: 'Lunch', station: 'International', reason: 'Spiced chicken you will love.', score: 81.3,
+    score_breakdown: { nutrition: null, food: 100, location: 50 },
     nutrition: { calories: 520, protein_grams: 32, carbs_grams: null, saturated_fat_grams: 4 },
     tags: { vegan: false, vegetarian: false, gluten_free: true, halal: true, cool_food: false },
     ingredients: 'Chicken, tomato, cream', allergy_notice: 'Speak with BU Dining staff about allergies.',
@@ -160,58 +162,50 @@ const RESULT = {
 }
 
 describe('RecommendPanel', () => {
-  it('requests menus from BU Dining, ranks dishes and renders results', async () => {
-    const fetchMock = recommendFetch(url => {
-      const location = url.includes('/marciano/') ? 'marciano' : 'warren'
-      if (location === 'marciano') return jsonResponse({ error: 'Marciano Commons menu is unavailable right now.' }, 502)
-      return jsonResponse(menuResponse(location, [diningItem()]))
-    }, [
-      { rank: 1, location: 'warren' },
-      { rank: 2, location: 'marciano' },
-    ])
+  it('requests AI recommendations and renders scores, reasons, and source links', async () => {
+    const fetchMock = mockFetch((url, init) => url.endsWith('/api/location-preferences')
+      ? jsonResponse({ preferences: LOCATION_RANKS })
+      : jsonResponse(RESULT))
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    const menuCalls = fetchMock.mock.calls.filter(([requestUrl]) => String(requestUrl).includes('/api/v1/dining/'))
-    expect(menuCalls).toHaveLength(2)
-    expect(menuCalls[0][0]).toContain(`day=${diningDate(0)}`)
+    const [url, init] = fetchMock.mock.calls.find(([requestUrl]) => String(requestUrl).endsWith('/api/recommend'))
+    expect(url).toContain('/api/recommend')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ date: diningDate(0), meal: 'current', locations: ['marciano', 'warren', 'west'] })
     expect(wrapper.find('.best-pick h3').text()).toBe('Warren Towers')
     expect(wrapper.find('.warnings').text()).toContain('Marciano Commons menu is unavailable')
     const card = wrapper.find('.rec-card')
     expect(card.find('h4').text()).toBe('Chicken Tikka Masala')
     expect(card.text()).toContain('Warren Towers · Lunch · International')
-    expect(card.text()).toContain('Matched against the saved dietary, food, nutrition, and location preferences.')
+    expect(card.text()).toContain('Spiced chicken you will love.')
+    expect(card.text()).toContain('Preference score: 81.3/100')
     expect(card.text()).toContain('520 kcal')
     expect(card.text()).not.toContain('Carbs')
     expect(card.findAll('.rec-tags li').map(tag => tag.text())).toEqual(['Gluten-free', 'Halal'])
-    expect(card.find('details').text()).toContain('Ingredient details are not available')
+    expect(card.find('details').text()).toContain('Chicken, tomato, cream')
     expect(card.find('a').attributes('rel')).toBe('noopener noreferrer')
-    expect(wrapper.text()).toContain('How your preferences were applied')
-    expect(wrapper.text()).toContain('Dietary labels (priority 1): Gluten-free.')
-    expect(wrapper.text()).toContain('Food keywords (preference priority 2): spicy chicken')
-    expect(wrapper.text()).toContain('Nutrition goals (preference priority 1): none selected.')
+    expect(wrapper.text()).toContain('Scoring weights')
+    expect(wrapper.text()).toContain('Food preferences: 63.6%')
   })
 
-  it('shows only the top 40 ranked recommendations', async () => {
-    const items = Array.from({ length: 41 }, (_, index) => diningItem({
-      id: `W${index + 1}`,
-      name: `Chicken dish ${index + 1}`,
-    }))
-    recommendFetch(url => jsonResponse(menuResponse('warren', items)), [
-      { rank: 1, location: 'warren' },
-    ])
+  it('preserves the recommendation order returned by the AI', async () => {
+    const response = { ...RESULT, recommendations: [...RESULT.recommendations, {
+      ...RESULT.recommendations[0], item_id: 'W2', name: 'Second AI choice', score: 40,
+    }] }
+    mockFetch(url => url.endsWith('/api/location-preferences')
+      ? jsonResponse({ preferences: [{ rank: 1, location: 'warren' }] })
+      : jsonResponse(response))
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.findAll('.rec-card')).toHaveLength(40)
-    expect(wrapper.find('.rec-card:last-child .rec-rank').text()).toBe('40')
-    expect(wrapper.text()).not.toContain('Chicken dish 41')
+    expect(wrapper.findAll('.rec-card').map(card => card.find('h4').text())).toEqual(['Chicken Tikka Masala', 'Second AI choice'])
   })
 
   it('hides "Now", removes dining hall controls, and requires a saved location', async () => {
-    const fetchMock = recommendFetch(() => jsonResponse(RESULT), [])
+    const fetchMock = mockFetch(() => jsonResponse({ preferences: [] }))
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     expect(wrapper.find('#rec-meal option').text()).toBe('Now')
     await wrapper.find('#rec-date').setValue(diningDate(1))
@@ -221,40 +215,34 @@ describe('RecommendPanel', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toBe('Choose at least one location in Location preference before requesting recommendations.')
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/dining/'))).toBe(false)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/recommend'))).toBe(false)
   })
 
-  it('requests menus only from ranked locations', async () => {
-    const fetchMock = recommendFetch(url => {
-      return jsonResponse(menuResponse('warren', [diningItem()]))
-    }, [{ rank: 1, location: 'warren' }])
+  it('sends only locations included in saved preferences', async () => {
+    const fetchMock = mockFetch(url => url.endsWith('/api/location-preferences')
+      ? jsonResponse({ preferences: [{ rank: 1, location: 'warren' }] })
+      : jsonResponse(RESULT))
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    const menuCalls = fetchMock.mock.calls
-      .map(([url]) => String(url))
-      .filter(url => url.includes('/api/v1/dining/'))
-    expect(menuCalls).toHaveLength(1)
-    expect(menuCalls[0]).toContain('/locations/warren/menu')
-    expect(wrapper.text()).toContain('Marciano Commons, West Campus')
+    const recCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/recommend'))
+    expect(JSON.parse(recCall[1].body).locations).toEqual(['warren'])
+    expect(wrapper.text()).toContain('Scoring weights')
   })
 
   it('shows an empty state and menu errors', async () => {
-    let items = []
-    let status = 200
-    recommendFetch(url => {
-      const location = url.includes('/marciano/') ? 'marciano' : url.includes('/warren/') ? 'warren' : 'west'
-      return jsonResponse(status === 200 ? menuResponse(location, items) : { error: 'Dining API unavailable.' }, status)
-    })
+    const fetchMock = mockFetch(url => url.endsWith('/api/location-preferences')
+      ? jsonResponse({ preferences: LOCATION_RANKS })
+      : jsonResponse({ ...RESULT, summary: 'No menu items match your dietary settings for this meal.', best_location: null, recommendations: [] }))
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('No menu items match')
     expect(wrapper.find('.rec-list').exists()).toBe(false)
 
-    items = [diningItem()]
-    status = 502
+    fetchMock.mockImplementationOnce(() => jsonResponse({ preferences: LOCATION_RANKS }))
+    fetchMock.mockImplementationOnce(() => jsonResponse({ error: 'Dining API unavailable.' }, 502))
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[role="alert"]').text()).toContain('Dining API unavailable.')

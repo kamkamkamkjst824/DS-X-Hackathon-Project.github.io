@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bu-auth-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-24",
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,https://kamkamkamkjst824.github.io,https://ds-x-hackathon-project-github-gml7v9r95-hackathon-504e.vercel.app,https://ds-x-hackathon-project-github-io.vercel.app,https://ds-x-hackathon-project-github-io-hackathon-504e.vercel.app,https://ds-x-hackathon-project-github-io-git-main-hackathon-504e.vercel.app"
+  },
+  // BU_API_KEY is a secret: `npx wrangler secret put BU_API_KEY` (local dev: .dev.vars).
+  // Workers AI is used for menu recommendations. It always runs remotely, even under `wrangler dev`.
+  "ai": {
+    "binding": "AI"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bu-auth",
+      "database_id": "9f733144-4025-4a7d-9a21-ecf385bca33b",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
