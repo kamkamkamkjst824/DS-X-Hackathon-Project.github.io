@@ -5,8 +5,8 @@ import { LOCATIONS, MAX_DAYS_AHEAD, MEALS, diningDate } from '../dining.js'
 import RecommendationCard from './RecommendationCard.vue'
 import { readLocationRanks } from '../recommendationRanking.js'
 
-const props = defineProps({ token: { type: String, required: true } })
-const emit = defineEmits(['expired'])
+const props = defineProps({ token: { type: String, required: true }, beforeRecommend: Function })
+const emit = defineEmits(['expired', 'busy'])
 
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const dates = Array.from({ length: MAX_DAYS_AHEAD + 1 }, (_, offset) => {
@@ -35,7 +35,9 @@ async function submit() {
   result.value = null
   notices.value = []
   loading.value = true
+  emit('busy', true)
   try {
+    await props.beforeRecommend?.()
     const locationRanks = await readLocationRanks(props.token)
     const locations = LOCATIONS
       .filter(location => Object.hasOwn(locationRanks, location.id))
@@ -57,6 +59,7 @@ async function submit() {
     else error.value = cause.message
   } finally {
     loading.value = false
+    emit('busy', false)
   }
 }
 </script>
@@ -64,7 +67,7 @@ async function submit() {
 <template>
   <section class="panel" aria-labelledby="recommend-title" :aria-busy="loading">
     <h2 id="recommend-title">Dish recommendation</h2>
-    <p class="intro">AI recommendations use your saved dietary needs and preference weights.</p>
+    <p class="intro">{{ beforeRecommend ? 'Save all your current preferences and get AI recommendations in one step.' : 'AI recommendations use your saved dietary needs and preference weights.' }}</p>
     <form novalidate @submit.prevent="submit">
       <div class="field-row">
         <div class="field">
@@ -81,7 +84,7 @@ async function submit() {
         </div>
       </div>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>
-      <button class="primary" type="submit" :disabled="loading">{{ loading ? 'Finding dishes…' : 'Dish recommendation' }}</button>
+      <button class="primary" type="submit" :disabled="loading">{{ loading ? 'Finding dishes…' : beforeRecommend ? 'Save and recommend' : 'Dish recommendation' }}</button>
     </form>
 
     <div class="results" aria-live="polite">
@@ -89,9 +92,11 @@ async function submit() {
       <template v-else-if="result">
         <div class="preference-summary">
           <h3>Scoring weights</h3>
+          <p class="hint">Actual weights used for this recommendation. Inactive preferences are excluded and the remaining weights are rescaled to total 100%.</p>
           <ul>
             <li v-for="line in result.preferenceSummary" :key="line">{{ line }}</li>
           </ul>
+          <p v-if="result.score_weights?.nutrition === 0" class="hint">To include nutrition, add a target for one dish above and give nutrition a positive weight, then save and recommend again.</p>
         </div>
         <div v-if="result.best_location" class="best-pick">
           <span class="account-label">Best pick for you</span>

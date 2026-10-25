@@ -12,7 +12,7 @@ The application supports Warren Towers (`warren`), West Campus (`west`), and Mar
 - [How a recommendation is generated](#how-a-recommendation-is-generated)
 - [Feature logic](#feature-logic)
 - [Data storage](#data-storage)
-- [Worker API and separate AI recommendation pipeline](#worker-api-and-separate-ai-recommendation-pipeline)
+- [Worker API and AI recommendation pipeline](#worker-api-and-ai-recommendation-pipeline)
 - [Local development](#local-development)
 - [Build and deployment](#build-and-deployment)
 - [Code map and verification](#code-map-and-verification)
@@ -20,15 +20,15 @@ The application supports Warren Towers (`warren`), West Campus (`west`), and Mar
 
 ## Architecture and request flow
 
-The development workspace separates the frontend repository from the backend:
+The repository contains both the frontend and backend:
 
 ```text
-HACKTHON_PROJ/
-├── DS-X-Hackathon-Project.github.io/  # This repository: Vue frontend
-└── Cloudflare_Part/                  # Separately maintained Worker, migrations, and backend tests
+DS-X-Hackathon-Project.github.io/
+├── src/                             # Vue frontend
+└── worker/                          # Worker, migrations, and backend tests
 ```
 
-`Cloudflare_Part` is outside this Git repository. Cloning this repository does not include the Worker source. Backend descriptions below refer to the accompanying workspace implementation.
+The original workspace directory `Cloudflare_Part` is retained as a reference; develop and deploy the backend from this repository's `worker/` directory.
 
 ```mermaid
 flowchart TD
@@ -36,8 +36,10 @@ flowchart TD
     W -->|Users, sessions, preferences, rate limits| D[(Cloudflare D1)]
     W -->|Server adds x-api-key and User-Agent| B[BU Dining API]
     W --> C[Menu cache: 10 minutes]
-    U --> L[localStorage: session token, ranking priorities]
-    U --> R[Browser filters and ranks dishes, displays top 40]
+    U --> L[localStorage: session token, legacy ranking priorities]
+    W --> R[Filter dishes, calculate weighted scores, shortlist top 20]
+    R --> A[Workers AI selects up to five dishes]
+    A --> U
 ```
 
 The browser sends the user's session token to the Worker, which adds its BU API key to upstream menu requests. The BU key is never sent to the browser or included in the frontend bundle.
@@ -46,12 +48,12 @@ The browser sends the user's session token to the Worker, which adds its BU API 
 
 1. `src/main.js` mounts `App.vue`. The app reads the saved browser session and validates it through the Worker's `/api/auth/me` endpoint.
 2. The app shows registration/sign-in when there is no valid session, or the preference and recommendation panels after successful authentication.
-3. The user saves dietary needs, food keywords, location rankings, nutrition goals, and ranking priorities in their respective panels. Recommendations use **saved values**; editing a form without saving does not update the recommendation inputs.
-4. Clicking **Dish recommendation** reads dietary preferences, location rankings, and nutrition goals from the Worker, and ranking priorities from localStorage.
-5. The frontend requests menus concurrently for included locations only. The Worker authenticates each request, validates its date, applies rate limiting, and fetches the menu using the server-side key.
-6. The frontend selects the requested meal and flattens `meals → stations → items` into a common dish format.
-7. Required dietary labels filter candidates first. The remaining dishes are sorted by the user's three ranking priorities.
-8. The first 40 dishes are displayed. The first dish's location becomes **Best pick for you**. The page explains the applied preferences and reports missing keywords or partial menu failures.
+3. The user edits dietary needs, food keywords, location rankings, nutrition targets for one dish, and ranking priorities. There are no separate save buttons on the main page.
+4. Clicking **Save and recommend** validates every panel before writing anything, saves the current preferences, then sends the selected date, meal, and included locations to `POST /api/recommend`. If validation or saving fails, it does not request recommendations. Saves use separate API calls, so a server failure can leave some panels saved; the page reports the error and lets the user retry.
+5. The Worker loads the account's saved preferences, nutrition goals, location rankings, and scoring settings from D1, then fetches menus using the server-side key.
+6. It normalizes menu items, applies dietary and location filters, and scores the remaining dishes using the active preference weights.
+7. Workers AI receives the top 20 scored candidates, user preferences, and effective weights. Its selections are validated against those candidates. If AI fails, the Worker uses the highest-scoring dishes.
+8. The page displays up to five recommendations with reasons, score breakdowns, and effective scoring weights. See [Recommendation priorities](#recommendation-priorities-weighted-scoring-and-advanced-mode) for why these weights can differ from the configured values.
 
 ## Feature logic
 
@@ -77,11 +79,11 @@ Dietary requirements always run before ranking. A preferred location or a better
 ### Food preferences: keyword matching
 
 - Food preferences accept up to 300 characters and are saved with the user's Worker account preferences.
-- Ranking splits the text on commas, semicolons, or newlines, removes duplicate keywords, and ignores case and accent differences.
-- A dish matches when its name contains the normalized keyword, or when a word longer than two characters from a multiword keyword matches a word in the dish name.
-- More matched keywords improve the dish's food-preference rank. This is text matching, not semantic search, translation, or synonym recognition; English dish-name keywords work best.
+- Scoring extracts up to 20 unique English words of at least three letters, removes stop words, and ignores case.
+- It matches keywords against dish names and descriptions, including simple plural handling. The food score is `100 × matched keywords / total keywords`; English keywords work best.
+- This numerical score uses text matching. The LLM also receives the preferences when selecting and explaining recommendations.
 - Keywords affect ordering only. Dishes with no keyword match remain eligible.
-- If a keyword matches none of the candidates remaining after dietary filtering, the page reports it and can suggest up to three dishes with zero keyword matches as alternatives. A missing keyword does not cause all dishes to be rejected.
+- Unmatched keywords contribute zero to the food score; they do not cause dishes to be rejected.
 
 ### Location preferences: ordering and exclusion
 
@@ -95,21 +97,24 @@ Rankings are saved per account through `PUT /api/location-preferences` as `{ pre
 
 Users can add targets for Calories, Carbohydrates, Protein, and Saturated Fat. Calories use kcal; the other values use grams. Inputs must be finite numbers between 0 and 100000. Only explicitly added targets participate in ranking.
 
-Although the panel is titled **Daily Nutrition Preferences**, the current algorithm compares **each individual dish** with the entered targets. It does not track daily intake, combine dishes into a meal plan, or accumulate nutrients across meals.
+Targets entered in the main page are **for one dish** and automatically participate in nutrition scoring after **Save and recommend**. There is no Goal scope selector or separate nutrition save button. For example, enter 500 kcal or 25 g protein for a dish rather than a whole day's intake.
+
+Existing **daily** targets are preserved until the user reviews them. The panel asks the user to adjust the values for one dish and check **I have reviewed these targets for one dish**, or use **Clear targets**. Until that review is complete, Save and recommend is blocked before any settings are written. A daily target such as 2,000 kcal is never silently converted into a single-dish target.
+
+The application does not track daily intake, combine dishes into a meal plan, or accumulate nutrients across meals.
 
 For each dish and selected nutrient:
 
-- A value within ±25% of the target counts as a match. For example, a 20 g protein target accepts 15–25 g.
-- Nutrition ranking first prefers dishes matching every target, then dishes matching more targets, then a smaller sum of relative errors: `Σ |dish value − target| / target`.
-- With a target of zero, only a dish value of zero matches. A nonzero value contributes infinite distance.
-- Missing or non-finite nutrition values do not match and make the total distance infinite, but do not by themselves remove the dish.
-- With no saved targets, the nutrition dimension does not affect ordering.
+- The nutrient score is `100 × max(0, 1 − |dish value − target| / target)`. The nutrition score averages the selected nutrient scores.
+- With a target of zero, a dish value of zero scores 100; other values score zero.
+- When nutrition has a positive effective weight, dishes missing any selected nutrient value are omitted, and the response reports this omission.
+- With no targets, nutrition is inactive and its effective weight is zero. Existing daily targets remain inactive on the backend until reviewed and saved as per-serving targets by the new flow.
 
-Targets are saved per account through `PUT /api/nutrition-preferences` as `{ goals: { calories: 2000, protein: 100 } }` and follow the user across browsers and devices. **Reset** saves an empty `{}`. Targets previously kept in browser localStorage are not migrated and must be saved again.
+Targets are saved per account through `PUT /api/nutrition-preferences`, for example `{ goals: { calories: 500, protein: 25 }, goal_scope: 'per-serving' }`; responses return `goalScope`. They follow the user across browsers and devices. **Clear targets** edits the current form; empty goals are persisted by **Save and recommend**. Targets previously kept in browser localStorage are not migrated and must be entered again.
 
 Saving the dietary/food preference form clears the legacy Worker fields `max_calories` and `min_protein` to `null`, preventing old per-dish limits from remaining active invisibly.
 
-### Recommendation priorities: ordered comparisons
+### Recommendation priorities: weighted scoring and Advanced Mode
 
 Users assign priorities 1–3 to nutrition, food keywords, and location. The defaults are:
 
@@ -117,11 +122,31 @@ Users assign priorities 1–3 to nutrition, food keywords, and location. The def
 2. Food keywords.
 3. Location ranking.
 
-Changing a priority to an occupied number swaps the affected categories. Saving verifies that the three values are unique. The order is stored under `recommendationPriorities` in localStorage.
+In default mode, priorities map to weights: first = **45%**, second = **35%**, third = **20%**. Thus the initial weights are nutrition 45%, food 35%, and location 20%. Changing a priority to an occupied number swaps the affected categories.
 
-The algorithm uses **ordered comparisons, not a weighted total score**. It compares priority 1 first, uses priority 2 only for a tie, then priority 3. If all dimensions tie, it preserves the original candidate order.
+**Advanced Mode** lets the user set each raw weight from 0 to 100. At least one must be positive. **Save and recommend** saves these settings along with all other panels. The mode, priority order, and custom weights are stored per account in D1 through `/api/recommendation-settings`; existing browser priorities are migrated when no server setting exists.
 
-For example, with food before location, a keyword-matching dish from West can rank above a nonmatching dish from Warren even when Warren is the user's preferred location. Mandatory dietary filters still apply before either comparison.
+#### Why the result can show 63.6% food, 36.4% location, and 0% nutrition
+
+The **Scoring weights** shown with a recommendation are the **effective weights for that request**. Before calculating a score, the Worker sets inactive dimensions to zero and normalizes the remaining weights to total 100%:
+
+`effective weight = active raw weight / sum of active raw weights × 100`
+
+- Nutrition is active when saved goals are nonempty and have per-serving scope, which the main page sets automatically for new targets and reviewed legacy targets.
+- Food preferences are active when the saved food preference text is nonempty. Having text that matches no dishes still gives a food score of zero; it does not disable this dimension.
+- Location remains active for the included halls. If all active raw weights are zero, the Worker uses location alone at 100%.
+
+For example, with default weights of nutrition 45, food 35, and location 20, but no per-serving nutrition goals, nutrition is excluded. The active total becomes `35 + 20 = 55`:
+
+| Dimension | Configured weight | Effective weight shown with results |
+| --- | --- | --- |
+| Food preferences | 35% | `35 / 55 × 100 = 63.6%` |
+| Dining location | 20% | `20 / 55 × 100 = 36.4%` |
+| Nutrition | 45% | 0% (inactive) |
+
+This does not change the saved settings. It applies in both default and Advanced Mode, so the percentages previewed beside the Advanced Mode sliders can differ from the result if a dimension is inactive. To include nutrition, enter at least one target for one dish, give nutrition a positive weight, and click **Save and recommend**. Existing daily targets require the one-time review described above.
+
+Each dish's total score is the weighted sum of its 0–100 factor scores. Location ranks 1, 2, and 3 score 100, 50, and 0 respectively. Dietary labels and excluded halls are always filtered first. The LLM receives the scores and effective weights to select and explain recommendations; it does not set or change the weights.
 
 ### Dates, meals, and result cards
 
@@ -129,9 +154,9 @@ For example, with food before location, a keyword-matching dish from West can ra
 - Meals are Now, Breakfast, Brunch, Lunch, and Dinner. Now is available only for today; changing to a future date switches Now to Lunch.
 - Now uses each location's `current_meal` from the BU response. A location without a current meal or matching menu may contribute no dishes.
 - Cards show the dish name, location, meal, station, description, available nutrition values, dietary labels, and BU source links.
-- The current menu-based frontend does not request individual ingredient details. Its ingredient section therefore reports that those details are unavailable instead of generating them.
-- The page displays at most 40 ranked dishes. Its best location comes from the top dish, not from a separate aggregate score for the entire dining hall.
-- Frontend menu expansion retains upstream station items, including some sides, sauces, and create-your-own components. It does not run the station exclusions used by the separate Worker AI pipeline.
+- The Worker attempts to fetch ingredient details for the selected dishes. Unavailable details are reported rather than generated.
+- The page displays at most five dishes. Its best location comes from the recommendations, rather than an independent aggregate score over the entire menu.
+- The Worker excludes selected condiment/create-your-own/salad-bar stations before scoring candidates.
 
 ### Partial failures and error handling
 
@@ -152,13 +177,13 @@ The menu endpoint allows 30 requests per user per fixed one-minute window. Loadi
 | Nutrition targets | D1 `nutrition_preferences` | Per account |
 | Request counters | D1 `rate_limits` | Per account and rate-limit bucket |
 | Browser session token | localStorage `bu-auth-session` | Current browser origin |
-| Ranking priorities | localStorage `recommendationPriorities` | Current browser origin, not per account |
+| Priority order, mode, and custom weights | D1 `recommendation_settings` | Per account; legacy localStorage priorities used for migration |
 | BU menus | Workers Cache API | Reused under a ten-minute cache policy |
 | BU_API_KEY | Worker secret; `.dev.vars` for local Worker development | Server-side only |
 
-`localhost`, `127.0.0.1`, different ports, and the deployed domain have separate localStorage, so the session and ranking priorities do not carry over between them. Everything stored in D1 follows the account.
+`localhost`, `127.0.0.1`, different ports, and the deployed domain have separate localStorage, so the session does not carry over between them. Saved preferences and scoring settings in D1 follow the account.
 
-## Worker API and separate AI recommendation pipeline
+## Worker API and AI recommendation pipeline
 
 The Worker base URL is configured through `VITE_API_BASE_URL`. The current default is:
 
@@ -172,23 +197,24 @@ The Worker base URL is configured through `VITE_API_BASE_URL`. The current defau
 | `POST /api/auth/logout` | Revoke the current session | Bearer token |
 | `GET` / `PUT /api/preferences` | Read / save account dietary preferences | Bearer token |
 | `GET` / `PUT /api/location-preferences` | Read / save ranked dining locations | Bearer token |
-| `GET` / `PUT /api/nutrition-preferences` | Read / save nutrition targets `{ goals }` | Bearer token |
+| `GET` / `PUT /api/nutrition-preferences` | Read / save nutrition targets; PUT uses `{ goals, goal_scope }`, responses return `goalScope` | Bearer token |
+| `GET` / `PUT /api/recommendation-settings` | Read / save priority order, mode, and custom weights | Bearer token |
 | `GET /api/v1/dining/locations/{location}/menu?day=YYYY-MM-DD` | Read a location's menu | Bearer token |
-| `POST /api/recommend` | Run server-side recommendations | Bearer token; not called by the current page |
+| `POST /api/recommend` | Score dishes and request AI recommendations for the current page | Bearer token |
 
 Errors normally use `{ "error": "English message" }`. Cross-origin access is limited by `ALLOWED_ORIGINS`; preflight allows `Content-Type` and `Authorization`. The Worker supplies `x-api-key` to BU without returning the key to the client.
 
-### The separate `/api/recommend` implementation
+### The `/api/recommend` implementation
 
-The accompanying Worker retains an independent recommendation endpoint accepting `{ date?, meal, locations? }`:
+The Worker recommendation endpoint accepts `{ date?, meal, locations? }`:
 
-1. Load dietary preferences from D1 and fetch menus concurrently.
-2. Normalize and deduplicate dishes, exclude selected condiment/create-your-own/salad-bar stations, and apply dietary and legacy nutrition-limit filters.
-3. Limit candidates to 120, taking turns across locations so one hall does not fill the entire candidate list.
+1. Load dietary preferences, location rankings, nutrition goals and scope, and scoring settings from D1; fetch menus concurrently.
+2. Normalize and deduplicate dishes, exclude selected condiment/create-your-own/salad-bar stations, and apply dietary and location filters.
+3. Compute effective weights and weighted scores, then shortlist the top 20 candidates.
 4. Try Workers AI with a list of allowed candidate references and validate the model's output against that list.
 5. Fall back to deterministic ranking if AI is unavailable, times out, or returns invalid output. Return at most five dishes and attempt to enrich them with ingredient details.
 
-This endpoint allows six requests per user per minute. **It is separate from the current browser's 40-dish ranking flow.** It does not read nutrition targets or ranking priorities, and the current page should not be described as using AI to rank its results.
+This endpoint allows six requests per user per minute. The current page uses this pipeline and displays the effective weights returned by the Worker.
 
 ## Local development
 
@@ -211,16 +237,15 @@ VITE_API_BASE_URL=https://bu-auth-worker.tangyingkai120.workers.dev
 
 Open http://localhost:5173 or http://127.0.0.1:5173 and use the same address consistently. Vite uses a strict port of 5173; if a server is already listening, use it rather than starting another instance.
 
-Sign in, save the settings in each preference panel, select a date and meal, and request recommendations. The default Worker uses live accounts and live data, not mock data.
+Sign in, edit preferences, select a date and meal, and click **Save and recommend**. Review any existing daily targets when prompted. The default Worker uses live accounts and live data, not mock data.
 
 ### Optional: run the Worker locally
 
-Obtain the accompanying `Cloudflare_Part` directory separately. From that directory:
+From this repository's `worker/` directory:
 
 ```powershell
 npm ci
-Copy-Item .dev.vars.example .dev.vars
-# Set BU_API_KEY in .dev.vars for the local Worker only.
+# Create .dev.vars and set BU_API_KEY for the local Worker only.
 npm run db:migrate
 npm run dev
 ```
@@ -251,7 +276,7 @@ Because every API call goes to the Worker, the static deployment supports the co
 
 ### Cloudflare Worker
 
-Deploy backend changes from the separate `Cloudflare_Part` directory. Pushing this frontend repository does not deploy the Worker.
+Deploy backend changes from this repository's `worker/` directory. Pushing the repository does not deploy the Worker.
 
 ```powershell
 npx wrangler login
@@ -271,12 +296,14 @@ Configure the intended D1 binding and `ALLOWED_ORIGINS` in `wrangler.jsonc`. For
 | `src/App.vue`, `src/auth.js` | Account UI, session restoration, sign-out |
 | `src/api.js` | Worker URL, Bearer tokens, JSON requests, errors |
 | `src/dining.js` | Worker menu loading, meal selection, normalization, partial failures |
-| `src/recommendationRanking.js` | Dietary filters, keyword matching, nutrition distance, ordered ranking, Worker reads for locations and nutrition targets |
+| `src/recommendationRanking.js` | Legacy priority migration and saved location reads |
+| `worker/src/scoring.js`, `worker/src/recommendation-settings.js` | Factor scores, active weight normalization, and saved scoring settings |
+| `worker/src/recommend.js`, `worker/src/llm.js` | Candidate filtering, scoring, AI selection, validation, and fallback |
 | `src/components/PreferencesForm.vue` | Account dietary labels and food keywords |
 | `src/components/LocationPreference.vue` | Worker location ranking reads and writes |
 | `src/components/NutritionPreferences.vue` | Worker nutrition target reads, writes, and reset |
 | `src/components/RecommendationPriorities.vue` | Priority editing, swapping, and storage |
-| `src/components/RecommendPanel.vue` | Request orchestration, explanations, best location, 40-result limit |
+| `src/components/RecommendPanel.vue` | Recommendation requests, effective weights, explanations, and results |
 | `src/components/RecommendationCard.vue` | Individual dish presentation |
 | `vite.config.js` | Vue integration, port 5173, test configuration |
 | `.github/workflows/deploy.yml` | Frontend Pages build and deployment |
@@ -310,6 +337,7 @@ Frontend tests cover authenticated menu calls, partial failures, session expiry,
 | Cross-origin 403 | Check ALLOWED_ORIGINS; localhost and 127.0.0.1 are different origins. |
 | 429 | Wait for the rate-limit window to reset before retrying. |
 | No dishes | Check the date, meal, operating hours, and dietary restrictions. |
-| Ranking priorities differ between browsers | They are still stored in localStorage. |
+| Scoring weights differ from configured weights; Nutrition is 0% | Only active dimensions are normalized to 100%. Enter a nutrition target for one dish, give nutrition a positive weight, then Save and recommend; see the calculation example above. |
+| Recommendation priorities shows Unable to connect | Check that the Worker has the new `/api/recommendation-settings` route and migrations 0005/0006 deployed. A missing route can fail CORS preflight and appear as a connection error. |
 
-The project remains a prototype: ranking priorities are still browser-local, nutrition targets are not a daily meal plan, menus can change, and menu labels do not replace direct allergen confirmation with dining staff.
+The project remains a prototype: nutrition targets are not a daily meal plan, menus can change, and menu labels do not replace direct allergen confirmation with dining staff.

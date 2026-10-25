@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ApiError, request } from '../api.js'
 
 // Goals are stored per account in the Worker (D1), endpoint /api/nutrition-preferences.
-const props = defineProps({ token: { type: String, required: true } })
+const props = defineProps({ token: { type: String, required: true }, unified: Boolean })
 const emit = defineEmits(['expired'])
 
 const PATH = '/api/nutrition-preferences'
@@ -18,7 +18,9 @@ const nutrients = [
   { key: 'saturated_fat', label: 'Saturated Fat', unit: 'g', step: '0.1' },
 ]
 const entries = ref([])
-const goalScope = ref('daily')
+const loaded = ref(false)
+const legacyDaily = ref(false)
+const confirmedTargets = ref(false)
 const availableNutrients = computed(() => nutrients.filter(
   nutrient => !entries.value.some(entry => entry.key === nutrient.key)
 ))
@@ -44,47 +46,64 @@ function handleError(cause, fallback) {
 async function putGoals(goals) {
   saving.value = true
   try {
-    await request(PATH, { method: 'PUT', token: props.token, body: { goals, goal_scope: goalScope.value } })
+    await request(PATH, { method: 'PUT', token: props.token, body: { goals, goal_scope: 'per-serving' } })
+    legacyDaily.value = false
     return true
   } finally {
     saving.value = false
   }
 }
 
-async function savePreferences() {
-  if (saving.value) return
-  message.value = ''
+function readGoals() {
   error.value = ''
-
+  if (!loaded.value) {
+    error.value = 'Reload your nutrition targets before recommending.'
+    return null
+  }
   const preferences = {}
   for (const entry of entries.value) {
     if (!entry.key) continue
 
     if (entry.value === '' || entry.value === null) {
       error.value = `Please enter a value for ${nutrients.find(item => item.key === entry.key).label}.`
-      return
+      return null
     }
 
     const value = Number(entry.value)
     if (!Number.isFinite(value) || value < 0 || value > 100000) {
       error.value = 'Please enter valid numbers between 0 and 100000.'
-      return
+      return null
     }
     preferences[entry.key] = value
   }
+  if (legacyDaily.value && Object.keys(preferences).length && !confirmedTargets.value) {
+    error.value = 'Review your previous daily targets and confirm they are appropriate for one dish, or clear them to continue.'
+    return null
+  }
+  return preferences
+}
+
+function validate() { return readGoals() !== null }
+
+async function savePreferences() {
+  if (saving.value) return false
+  const preferences = readGoals()
+  if (preferences === null) return false
+  message.value = ''
 
   try {
     await putGoals(preferences)
     message.value = 'Nutrition preferences saved successfully!'
+    return true
   } catch (cause) {
     handleError(cause, 'Unable to save preferences. Please try again.')
+    return false
   }
 }
 
 async function loadPreferences() {
   try {
     const { goals, goalScope: savedScope = 'daily' } = await request(PATH, { token: props.token })
-    goalScope.value = savedScope
     if (!goals || typeof goals !== 'object' || Array.isArray(goals)) {
       throw new Error('Saved nutrition preferences have an unexpected format.')
     }
@@ -96,6 +115,8 @@ async function loadPreferences() {
         key: nutrient.key,
         value: String(goals[nutrient.key]),
       }))
+    legacyDaily.value = savedScope === 'daily' && entries.value.length > 0
+    loaded.value = true
   } catch (cause) {
     handleError(cause, 'Unable to load saved preferences.')
   }
@@ -105,6 +126,12 @@ async function resetPreferences() {
   if (saving.value) return
   error.value = ''
   message.value = ''
+  if (props.unified) {
+    entries.value = []
+    legacyDaily.value = false
+    confirmedTargets.value = false
+    return
+  }
   try {
     await putGoals({})
     entries.value = []
@@ -115,11 +142,17 @@ async function resetPreferences() {
 }
 
 onMounted(loadPreferences)
+defineExpose({ validate, save: savePreferences })
 </script>
 
 <template>
   <div class="nutrition-container">
-    <form @submit.prevent="savePreferences">
+    <p class="intro">Set targets for one dish, such as 500 kcal or 25 g protein. Any targets you enter will be used when you save and recommend.</p>
+    <form @submit.prevent="!unified && savePreferences()">
+      <div v-if="legacyDaily && entries.length" class="legacy-targets">
+        <p>Your previous targets were saved for a whole day. Review and adjust them for one dish, or clear them before continuing.</p>
+        <label class="check"><input v-model="confirmedTargets" type="checkbox" /> I have reviewed these targets for one dish.</label>
+      </div>
       <div v-if="entries.length" class="nutrition-flexbox">
         <div v-for="entry in entries" :key="entry.id" class="nutrition-entry">
           <div class="nutrition-field">
@@ -163,14 +196,6 @@ onMounted(loadPreferences)
         </div>
       </div>
 
-      <div class="nutrition-field scope-field">
-        <label for="nutrition-scope">Goal scope</label>
-        <select id="nutrition-scope" v-model="goalScope">
-          <option value="daily">Daily target (not used for single-dish ranking)</option>
-          <option value="per-serving">Per-serving target (used for single-dish ranking)</option>
-        </select>
-      </div>
-
       <button
         type="button"
         class="add-nutrition"
@@ -191,7 +216,7 @@ onMounted(loadPreferences)
 
       <!-- Buttons -->
       <div class="button-container">
-        <button type="submit" class="save-button" :disabled="saving">
+        <button v-if="!unified" type="submit" class="save-button" :disabled="saving">
           {{ saving ? 'Saving…' : 'Save Preferences' }}
         </button>
 
@@ -201,7 +226,7 @@ onMounted(loadPreferences)
           :disabled="saving"
           @click="resetPreferences"
         >
-          Reset
+          Clear targets
         </button>
       </div>
     </form>
@@ -219,6 +244,15 @@ onMounted(loadPreferences)
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   color: #1f2937;
+}
+
+.legacy-targets {
+  margin-bottom: 20px;
+  padding: 14px;
+  background: #fff8e8;
+  border: 1px solid #e7c875;
+  border-radius: 8px;
+  font-size: 14px;
 }
 
 /* Flexbox layout */

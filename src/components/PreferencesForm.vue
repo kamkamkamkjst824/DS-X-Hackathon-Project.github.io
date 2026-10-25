@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ApiError } from '../api.js'
 import { DEFAULT_PREFERENCES, getPreferences, savePreferences } from '../dining.js'
 
-const props = defineProps({ token: { type: String, required: true } })
+const props = defineProps({ token: { type: String, required: true }, unified: Boolean })
 const emit = defineEmits(['expired', 'saved'])
 
 const DIETS = [
@@ -16,6 +16,7 @@ const MAX_LIKES = 300
 
 const form = reactive({ ...DEFAULT_PREFERENCES })
 const loading = ref(true)
+const loaded = ref(false)
 const saving = ref(false)
 const error = ref('')
 const status = ref('')
@@ -35,6 +36,7 @@ async function load() {
   error.value = ''
   try {
     fill((await getPreferences(props.token)).preferences)
+    loaded.value = true
   } catch (cause) {
     fail(cause)
   } finally {
@@ -42,8 +44,14 @@ async function load() {
   }
 }
 
+function validate() {
+  error.value = !loaded.value ? 'Reload your dietary preferences before recommending.'
+    : form.likes.length > MAX_LIKES ? 'Food preferences must be 300 characters or fewer.' : ''
+  return !error.value
+}
+
 async function save() {
-  if (saving.value) return
+  if (saving.value || !validate()) return false
   error.value = ''
   status.value = ''
   const body = {
@@ -51,7 +59,7 @@ async function save() {
     vegan: form.vegan,
     gluten_free: form.gluten_free,
     halal: form.halal,
-    // Nutrition goals live in "Daily Nutrition Preferences"; clear any old
+    // Nutrition goals live in their own panel; clear any old
     // per-dish limits so they can't keep filtering menus invisibly.
     max_calories: null,
     min_protein: null,
@@ -63,14 +71,17 @@ async function save() {
     fill(result.preferences)
     status.value = 'Preferences saved.'
     emit('saved', result.preferences)
+    return true
   } catch (cause) {
     fail(cause)
+    return false
   } finally {
     saving.value = false
   }
 }
 
 onMounted(load)
+defineExpose({ validate, save })
 </script>
 
 <template>
@@ -78,7 +89,7 @@ onMounted(load)
     <h2 id="preferences-title">Dietary needs</h2>
     <p class="intro">Selected dietary labels are required: dishes without every selected label are excluded.</p>
     <p v-if="loading" class="intro" role="status">Loading your preferences…</p>
-    <form v-else novalidate @submit.prevent="save">
+    <form v-else novalidate @submit.prevent="!unified && save()">
       <fieldset class="choices">
         <legend>Select all that apply</legend>
         <label v-for="diet in DIETS" :key="diet.key" class="check">
@@ -98,7 +109,7 @@ onMounted(load)
       </section>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>
       <p v-if="status" class="success" role="status">{{ status }}</p>
-      <button class="primary" type="submit" :disabled="saving">{{ saving ? 'Saving…' : 'Save preferences' }}</button>
+      <button v-if="!unified" class="primary" type="submit" :disabled="saving">{{ saving ? 'Saving…' : 'Save preferences' }}</button>
     </form>
   </section>
 </template>
