@@ -25,6 +25,20 @@ const busy = ref(false)
 const checking = ref(true)
 const error = ref('')
 const needsRetry = ref(false)
+const planning = ref(false)
+const preferencesForm = ref(null)
+const locationPreference = ref(null)
+const nutritionPreferences = ref(null)
+const recommendationPriorities = ref(null)
+
+async function saveAllPreferences() {
+  const panels = [preferencesForm.value, locationPreference.value, nutritionPreferences.value, recommendationPriorities.value]
+  const valid = panels.map(panel => panel?.validate())
+  if (valid.some(value => !value)) throw new Error('Please check the highlighted preferences above before recommending.')
+  for (const panel of panels) {
+    if (!await panel.save()) throw new Error('Some preferences could not be saved. Please check the messages above and try again.')
+  }
+}
 
 const isRegister = computed(() => mode.value === 'register')
 
@@ -213,59 +227,20 @@ onMounted(restoreSession)
               Signed in as {{ user.email }}
             </p>
           </div>
-
-          <button
-            class="secondary"
-            type="button"
-            :disabled="busy"
-            @click="logout"
-          >
-            {{ busy ? 'Signing out…' : 'Sign out' }}
-          </button>
+          <button class="secondary" type="button" :disabled="busy || planning" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
         </header>
-
-        <p v-if="error" class="feedback" role="alert">
-          {{ error }}
-        </p>
-
-        <!-- Dietary and food preferences -->
-        <PreferencesForm
-          :token="token"
-          @expired="sessionExpired"
-        />
-
-        <!-- Dining hall rankings -->
-        <LocationPreference
-          :token="token"
-          @expired="sessionExpired"
-        />
-
-        <!-- Nutrition preferences -->
+        <p v-if="error" class="feedback" role="alert">{{ error }}</p>
+        <p class="intro">Adjust your preferences below, then choose Save and recommend. Your changes are saved together before finding dishes.</p>
+        <fieldset class="planner-fields" :disabled="planning">
+        <PreferencesForm ref="preferencesForm" :token="token" unified @expired="sessionExpired" />
+        <LocationPreference ref="locationPreference" :token="token" unified @expired="sessionExpired" />
         <div class="dining-planner">
-          <h2>Daily Nutrition Preferences</h2>
-
-          <p class="intro">
-            Add only the nutrition goals you want considered
-            in your dining recommendations.
-          </p>
-
-          <NutritionPreferences
-            :token="token"
-            @expired="sessionExpired"
-          />
+          <h2>Nutrition targets for one dish</h2>
+          <NutritionPreferences ref="nutritionPreferences" :token="token" unified @expired="sessionExpired" />
         </div>
-
-        <!-- Recommendation priorities -->
-        <RecommendationPriorities />
-
-        <!-- Dish recommendations -->
-        <!-- Email is passed for favorite dish functionality -->
-        <RecommendPanel
-          :token="token"
-          :email="user.email"
-          @expired="sessionExpired"
-        />
-
+        <RecommendationPriorities ref="recommendationPriorities" :token="token" unified @expired="sessionExpired" />
+        </fieldset>
+        <RecommendPanel :token="token" :email="user.email" :before-recommend="saveAllPreferences" @busy="planning = $event" @expired="sessionExpired" />
       </template>
 
       <!-- Connection error -->
@@ -408,6 +383,12 @@ onMounted(restoreSession)
   min-height: 100vh;
 }
 
+.planner-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 .dining-planner {
   display: flex;
   flex-direction: column;

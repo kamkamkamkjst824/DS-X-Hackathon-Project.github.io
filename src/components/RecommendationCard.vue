@@ -81,26 +81,13 @@ const favoriteDish = computed(() => ({
         />
       </div>
     </div>
-
-    <p class="rec-reason">
-      {{ item.reason }}
+    <p class="rec-score"><strong>Preference score: {{ Number(item.score || 0).toFixed(1) }}/100</strong>
+      <span v-if="item.score_breakdown"> · Nutrition {{ item.score_breakdown.nutrition ?? '—' }} · Food {{ item.score_breakdown.food ?? '—' }} · Location {{ item.score_breakdown.location }}</span>
     </p>
-
-    <p
-      v-if="item.description"
-      class="rec-description"
-    >
-      {{ item.description }}
-    </p>
-
-    <dl
-      v-if="nutrition.length"
-      class="rec-nutrition"
-    >
-      <div
-        v-for="[label, value, unit] in nutrition"
-        :key="label"
-      >
+    <p class="rec-reason">{{ item.reason }}</p>
+    <p v-if="item.description" class="rec-description">{{ item.description }}</p>
+    <dl v-if="nutrition.length" class="rec-nutrition">
+      <div v-for="[label, value, unit] in nutrition" :key="label">
         <dt>{{ label }}</dt>
         <dd>{{ value }} {{ unit }}</dd>
       </div>

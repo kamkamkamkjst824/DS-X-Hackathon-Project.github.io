@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, request } from '../api.js'
 
-const props = defineProps({ token: { type: String, required: true } })
+const props = defineProps({ token: { type: String, required: true }, unified: Boolean })
 const emit = defineEmits(['expired'])
 
 const locations = [
@@ -18,6 +18,7 @@ const ranks = ref({
 })
 const message = ref('')
 const saving = ref(false)
+const loaded = ref(false)
 
 const rankedLocations = computed(() => Object.entries(ranks.value)
   .filter(([, rank]) => rank !== '' && rank !== 'excluded'))
@@ -26,13 +27,22 @@ const uniqueRanks = computed(() => {
   return new Set(selectedRanks).size === selectedRanks.length
 })
 
-async function savePreferences() {
+function validate() {
+  if (!loaded.value) {
+    message.value = 'Reload your location preferences before recommending.'
+    return false
+  }
   if (!rankedLocations.value.length || !uniqueRanks.value) {
     message.value = rankedLocations.value.length
       ? 'Each included location must have a unique rank from 1 to 3.'
       : 'Choose at least one location to include in recommendations.'
-    return
+    return false
   }
+  return true
+}
+
+async function savePreferences() {
+  if (saving.value || !validate()) return false
 
   const preferences = rankedLocations.value
     .map(([location, rank]) => ({ rank: Number(rank), location }))
@@ -47,11 +57,13 @@ async function savePreferences() {
       body: { preferences },
     })
     message.value = 'Preference saved.'
+    return true
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) emit('expired')
     message.value = error instanceof Error
       ? error.message
       : 'Could not save preference. Please try again.'
+    return false
   } finally {
     saving.value = false
   }
@@ -67,6 +79,7 @@ onMounted(async () => {
         ranks.value[location] = String(rank)
       }
     }
+    loaded.value = true
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) emit('expired')
     message.value = error instanceof Error
@@ -74,6 +87,7 @@ onMounted(async () => {
       : 'Could not load saved preference. Please try again.'
   }
 })
+defineExpose({ validate, save: savePreferences })
 </script>
 
 <template>
@@ -81,7 +95,7 @@ onMounted(async () => {
     <h2 id="location-preferences-title">Location preference</h2>
     <p class="location-preferences-intro">Rank locations you want included. Choose “Don't want” to exclude a location from recommendations.</p>
 
-    <form @submit.prevent="savePreferences">
+    <form @submit.prevent="!unified && savePreferences()">
       <div v-for="location in locations" :key="location.id" class="location-preference-field">
         <label :for="`preference-${location.id}`">{{ location.name }}</label>
         <select
@@ -102,7 +116,7 @@ onMounted(async () => {
         </select>
       </div>
 
-      <button class="primary" type="submit" :disabled="saving">
+      <button v-if="!unified" class="primary" type="submit" :disabled="saving">
         {{ saving ? 'Saving…' : 'Save preference' }}
       </button>
     </form>
