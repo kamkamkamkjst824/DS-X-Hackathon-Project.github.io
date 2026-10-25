@@ -70,10 +70,14 @@ function handleStorage(event) {
 }
 
 const isToday = computed(() => date.value === today.value)
-const mealOptions = computed(() => [
-  ...(isToday.value ? ['current'] : []),
-  ...availableMeals.value.filter(name => name.toLocaleLowerCase() !== 'current'),
-])
+const mealOptions = computed(() => {
+  const available = availableMeals.value.filter(name => name.toLocaleLowerCase() !== 'current')
+  return [
+    ...(isToday.value ? ['current'] : []),
+    // Before menus load, or with no saved locations, keep the selector usable instead of empty.
+    ...(available.length ? available : MEALS.filter(name => name !== 'current')),
+  ]
+})
 
 async function refreshAvailableMeals() {
   const requestId = ++availabilityRequest

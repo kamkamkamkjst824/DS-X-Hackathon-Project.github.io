@@ -47,6 +47,7 @@ describe('NutritionTracker', () => {
     const reloaded = mount(NutritionTracker, {
       props: { userEmail: 'student@bu.edu' },
     })
+    await flushPromises()
     expect(reloaded.text()).toContain('Greek yogurt bowl')
     expect(totalRows(reloaded)[1].text()).toContain('18 g')
   })

@@ -175,11 +175,13 @@ describe('RecommendPanel', () => {
       await flushPromises()
       const button = wrapper.find('.favorite-button')
       await button.trigger('click')
-      expect(button.attributes('aria-pressed')).toBe('true')
+      // Favoriting moves the card into the "Favorite dishes" group, so re-query it.
+      const favoriteButton = wrapper.find('.favorite-list .favorite-button')
+      expect(favoriteButton.attributes('aria-pressed')).toBe('true')
       expect(JSON.parse(localStorage.getItem(storageKey))).toEqual([
         expect.objectContaining({ id: 'W1', name: 'Chicken Tikka Masala', location: 'warren' }),
       ])
-      await button.trigger('click')
+      await favoriteButton.trigger('click')
       expect(JSON.parse(localStorage.getItem(storageKey))).toEqual([])
       expect(wrapper.text()).toContain('Preference score: 81.3/100')
     } finally {
@@ -258,9 +260,16 @@ describe('RecommendPanel', () => {
   })
 
   it('shows an empty state and menu errors', async () => {
-    const fetchMock = mockFetch(url => url.endsWith('/api/location-preferences')
-      ? jsonResponse({ preferences: LOCATION_RANKS })
-      : jsonResponse({ ...RESULT, summary: 'No menu items match your dietary settings for this meal.', best_location: null, recommendations: [] }))
+    const emptyResult = { ...RESULT, summary: 'No menu items match your dietary settings for this meal.', best_location: null, recommendations: [] }
+    const fetchMock = mockFetch(url => {
+      if (url.endsWith('/api/location-preferences')) return jsonResponse({ preferences: LOCATION_RANKS })
+      // Menu availability runs on mount; answer it with menu-shaped data so it does not
+      // leave an unrelated alert in the DOM.
+      if (url.includes('/api/v1/dining/locations/')) {
+        return jsonResponse(menuResponse(url.split('/locations/')[1].split('/')[0]))
+      }
+      return jsonResponse(emptyResult)
+    })
     const wrapper = mount(RecommendPanel, { props: { token: TOKEN } })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
