@@ -277,6 +277,10 @@ npm run preview -- --host 127.0.0.1
 
 Build output goes to `dist/`. Preview serves the built files for inspection; it is not the development server. Production configuration includes the public Worker URL in `.env.production`, but local overrides can change the effective URL. Check the intended backend before building.
 
+### Vercel preview links
+
+For Vercel testing of `feat/ai-weighted-recommendations`, use the stable [feature branch preview](https://ds-x-hackathon-project-github-io-git-feat-b7ee8d-hackathon-504e.vercel.app/). Its origin is allowed by the Worker. Individual deployment URLs change between builds and are not automatically added to `ALLOWED_ORIGINS`; sharing a new deployment URL can therefore cause browser requests to fail even when the Vercel build succeeded.
+
 ### GitHub Pages
 
 `.github/workflows/deploy.yml` runs on pushes to `main` or manual dispatch. It installs dependencies, runs `build:pages`, uploads `dist`, and deploys to Pages. In the repository's **Settings → Pages → Build and deployment**, select **GitHub Actions** as the source.
