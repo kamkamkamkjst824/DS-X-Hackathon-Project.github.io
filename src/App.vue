@@ -1,12 +1,20 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api, ApiError, clearSession, readSession, saveSession } from './auth.js'
+import {
+  api,
+  ApiError,
+  clearSession,
+  readSession,
+  saveSession
+} from './auth.js'
+
 import PreferencesForm from './components/PreferencesForm.vue'
 import RecommendPanel from './components/RecommendPanel.vue'
 import LocationPreference from './components/LocationPreference.vue'
 import NutritionPreferences from './components/NutritionPreferences.vue'
 import RecommendationPriorities from './components/RecommendationPriorities.vue'
+import ProfileMenu from './components/ProfileMenu.vue'
 
 const mode = ref('login')
 const email = ref('')
@@ -35,12 +43,18 @@ async function restoreSession() {
     const session = readSession()
     if (!session) return
 
-    const result = await api('/me', { token: session.token })
+    const result = await api('/me', {
+      token: session.token
+    })
+
     token.value = session.token
     user.value = result.user
+
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
       clearSession()
+      token.value = ''
+      user.value = null
       error.value = 'Your session has expired. Please sign in again.'
     } else {
       needsRetry.value = true
@@ -70,26 +84,30 @@ async function submit() {
   busy.value = true
 
   try {
-    const result = await api(isRegister.value ? '/register' : '/login', {
-      method: 'POST',
-      body: {
-        email: normalizedEmail,
-        password: password.value,
-      },
-    })
+    const result = await api(
+      isRegister.value ? '/register' : '/login',
+      {
+        method: 'POST',
+        body: {
+          email: normalizedEmail,
+          password: password.value
+        }
+      }
+    )
 
     try {
       saveSession(result)
     } catch {
       await api('/logout', {
         method: 'POST',
-        token: result.token,
+        token: result.token
       }).catch(() => {})
 
       throw new Error(
         'Unable to save your session. Please enable local storage and try again.'
       )
     }
+
     token.value = result.token
     user.value = result.user
     email.value = result.user.email
@@ -114,10 +132,13 @@ async function logout() {
       try {
         await api('/logout', {
           method: 'POST',
-          token: session.token,
+          token: session.token
         })
       } catch (cause) {
-        if (!(cause instanceof ApiError) || cause.status !== 401) {
+        if (
+          !(cause instanceof ApiError) ||
+          cause.status !== 401
+        ) {
           throw cause
         }
       }
@@ -135,7 +156,7 @@ async function logout() {
   }
 }
 
-// A dining request returned 401: the session is gone server-side.
+// Handle expired authentication sessions
 function sessionExpired() {
   clearSession()
   user.value = null
@@ -150,45 +171,104 @@ onMounted(restoreSession)
 
 <template>
   <main class="page">
+
+    <!-- Profile menu -->
+    <ProfileMenu
+      v-if="user && !checking"
+      :email="user.email"
+      :token="token"
+    />
+
     <section
       class="auth-card"
       :class="{ dashboard: user && !checking }"
       aria-labelledby="page-title"
       :aria-busy="busy || checking"
     >
+
+      <!-- BU Branding -->
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">BU</span>
-        <span>{{ user && !checking ? 'CAMPUS DINING' : 'CAMPUS ACCOUNT' }}</span>
+        <span class="brand-mark" aria-hidden="true">
+          BU
+        </span>
+
+        <span>
+          {{ user && !checking ? 'CAMPUS DINING' : 'CAMPUS ACCOUNT' }}
+        </span>
       </div>
 
-      <!-- CHECKING SESSION -->
+      <!-- Checking session -->
       <template v-if="checking">
         <h1 id="page-title">Checking your session</h1>
         <p class="intro" role="status">Just a moment…</p>
       </template>
 
-      <!-- USER IS SIGNED IN -->
+      <!-- Signed-in dashboard -->
       <template v-else-if="user">
+
         <header class="dashboard-head">
           <div>
             <h1 id="page-title">What should you eat today?</h1>
-            <p class="intro">Signed in as {{ user.email }}</p>
+            <p class="intro">
+              Signed in as {{ user.email }}
+            </p>
           </div>
-          <button class="secondary" type="button" :disabled="busy" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
+
+          <button
+            class="secondary"
+            type="button"
+            :disabled="busy"
+            @click="logout"
+          >
+            {{ busy ? 'Signing out…' : 'Sign out' }}
+          </button>
         </header>
-        <p v-if="error" class="feedback" role="alert">{{ error }}</p>
-        <PreferencesForm :token="token" @expired="sessionExpired" />
-        <LocationPreference :token="token" @expired="sessionExpired" />
+
+        <p v-if="error" class="feedback" role="alert">
+          {{ error }}
+        </p>
+
+        <!-- Dietary and food preferences -->
+        <PreferencesForm
+          :token="token"
+          @expired="sessionExpired"
+        />
+
+        <!-- Dining hall rankings -->
+        <LocationPreference
+          :token="token"
+          @expired="sessionExpired"
+        />
+
+        <!-- Nutrition preferences -->
         <div class="dining-planner">
           <h2>Daily Nutrition Preferences</h2>
-          <p class="intro">Add only the nutrition goals you want considered in your dining recommendations.</p>
-          <NutritionPreferences :token="token" @expired="sessionExpired" />
+
+          <p class="intro">
+            Add only the nutrition goals you want considered
+            in your dining recommendations.
+          </p>
+
+          <NutritionPreferences
+            :token="token"
+            @expired="sessionExpired"
+          />
         </div>
+
+        <!-- Recommendation priorities -->
         <RecommendationPriorities />
-        <RecommendPanel :token="token" @expired="sessionExpired" />
+
+        <!-- Dish recommendations -->
+        <!-- Email is passed for favorite dish functionality -->
+        <RecommendPanel
+          :token="token"
+          :email="user.email"
+          @expired="sessionExpired"
+        />
+
       </template>
 
-      <!-- CONNECTION ERROR -->
+      <!-- Connection error -->
       <template v-else-if="needsRetry">
         <h1 id="page-title">Unable to connect</h1>
 
@@ -200,24 +280,32 @@ onMounted(restoreSession)
           {{ error }}
         </p>
 
-        <button class="primary" @click="restoreSession">
+        <button
+          class="primary"
+          @click="restoreSession"
+        >
           Try again
         </button>
       </template>
 
-      <!-- LOGIN AND REGISTRATION -->
+      <!-- Login and registration -->
       <template v-else>
         <h1 id="page-title">
           {{ isRegister ? 'Create your account' : 'Welcome back' }}
         </h1>
 
         <p class="intro">
-          {{ isRegister
-            ? 'Get started with your BU email address.'
-            : 'Sign in to your BU campus account.' }}
+          {{
+            isRegister
+              ? 'Get started with your BU email address.'
+              : 'Sign in to your BU campus account.'
+          }}
         </p>
 
-        <div class="mode-switch" aria-label="Account action">
+        <div
+          class="mode-switch"
+          aria-label="Account action"
+        >
           <button
             type="button"
             :class="{ active: !isRegister }"
@@ -240,6 +328,7 @@ onMounted(restoreSession)
         </div>
 
         <form novalidate @submit.prevent="submit">
+
           <div class="field">
             <label for="email">Email</label>
 
@@ -269,7 +358,9 @@ onMounted(restoreSession)
               v-model="password"
               type="password"
               name="password"
-              :autocomplete="isRegister ? 'new-password' : 'current-password'"
+              :autocomplete="
+                isRegister ? 'new-password' : 'current-password'
+              "
               placeholder="Enter your password"
               required
               minlength="8"
@@ -292,11 +383,13 @@ onMounted(restoreSession)
             type="submit"
             :disabled="busy"
           >
-            {{ busy
-              ? 'Please wait…'
-              : isRegister
-                ? 'Create account'
-                : 'Sign in' }}
+            {{
+              busy
+                ? 'Please wait…'
+                : isRegister
+                  ? 'Create account'
+                  : 'Sign in'
+            }}
           </button>
         </form>
 
@@ -304,11 +397,17 @@ onMounted(restoreSession)
           Stay signed in on this device for 7 days
         </p>
       </template>
+
     </section>
   </main>
 </template>
 
 <style scoped>
+.page {
+  position: relative;
+  min-height: 100vh;
+}
+
 .dining-planner {
   display: flex;
   flex-direction: column;
