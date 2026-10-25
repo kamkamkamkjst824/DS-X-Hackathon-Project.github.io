@@ -2,6 +2,7 @@
 <script setup>
 import { computed } from 'vue'
 import FavoriteDishButton from './FavoriteDishButton.vue'
+import DishRating from './DishRating.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -97,6 +98,9 @@ const favoriteDish = computed(() => ({
     </p>
     <p class="rec-reason">{{ item.reason }}</p>
     <p v-if="item.description" class="rec-description">{{ item.description }}</p>
+
+    <DishRating :item="item" />
+
     <dl v-if="nutrition.length" class="rec-nutrition">
       <div v-for="[label, value, unit] in nutrition" :key="label">
         <dt>{{ label }}</dt>
