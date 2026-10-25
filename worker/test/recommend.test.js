@@ -11,19 +11,43 @@ import { fakeBu, menu } from './fixtures.js'
 const NOW = new Date('2026-10-24T16:00:00Z') // Noon in Boston.
 const prefs = overrides => ({ ...DEFAULT_PREFERENCES, ...overrides })
 
-function deps({ bu = fakeBu(), ai = null } = {}) {
-  return { apiKey: 'test-key', fetcher: bu.handler, cache: null, ai, bu }
+function deps({ bu = fakeBu(), ai = null, db = null, userId = 'test-user' } = {}) {
+  return { apiKey: 'test-key', fetcher: bu.handler, cache: null, ai, db, userId, bu }
 }
 
-function fakeAi(output) {
+/**
+ * Fake Workers AI. A single value or function controls the ranking call; pass
+ * `{ interpretation, ranking }` to control both calls. Interpretation defaults to '{}'
+ * (unusable), so tests fall back to literal keyword matching unless they opt in.
+ */
+function fakeAi(config) {
   const calls = []
+  const routed = config && typeof config === 'object' && ('ranking' in config || 'interpretation' in config)
+  const routes = routed ? { interpretation: '{}', ...config } : { ranking: config, interpretation: '{}' }
   return {
     calls,
     async run(model, input) {
       calls.push({ model, input })
+      const isInterpretation = /structured search terms/.test(input.messages[0].content)
+      const output = isInterpretation ? routes.interpretation : routes.ranking
       if (output instanceof Error) throw output
       return { response: typeof output === 'function' ? output(input) : output }
     },
+  }
+}
+
+function fakeDb() {
+  const rows = new Map()
+  return {
+    rows,
+    prepare: () => ({
+      bind(...args) {
+        return {
+          first: async () => rows.get(args[0]) ?? null,
+          run: async () => { rows.set(args[0], { likes_hash: args[1], interpretation: args[2] }) },
+        }
+      },
+    }),
   }
 }
 
@@ -189,4 +213,96 @@ test('recommend handles all-failed upstreams, no matches and "current" meal', as
   const open = await recommend({ preferences: prefs(), date: '2026-10-24', meal: 'current', locations: ['west'] }, deps({ bu: fakeBu({ currentMeal: 'Lunch' }) }))
   assert.equal(open.locations[0].meal, 'Lunch')
   assert.equal(open.recommendations.length, 2)
+})
+
+const interpretationOutput = JSON.stringify({ keywords: ['pizza'], include: ['pizza'], exclude: [], flavors: [] })
+
+test('recommend uses AI-interpreted preferences and the model hall choice', async () => {
+  const ai = fakeAi({
+    interpretation: interpretationOutput,
+    ranking: JSON.stringify({ best_location: 'west', summary: 'Pizza at West.', picks: [{ ref: 'c1', reason: 'Cheesy.' }] }),
+  })
+  const result = await recommend({ preferences: prefs({ likes: '披萨' }), date: '2026-10-24', meal: 'Lunch', locations: ['west', 'warren'] }, deps({ ai }))
+
+  assert.equal(ai.calls.length, 2)
+  assert.match(ai.calls[0].input.messages[0].content, /structured search terms/)
+  assert.match(ai.calls[1].input.messages[1].content, /Interpreted food preferences: wants pizza/)
+  assert.match(ai.calls[1].input.messages[1].content, /Dining hall summary:/)
+  assert.equal(result.preference_interpretation.source, 'ai')
+  assert.deepEqual(result.preference_interpretation.keywords, ['pizza'])
+  assert.equal(result.best_location_source, 'ai')
+  assert.equal(result.best_location.id, 'west')
+  assert.equal(result.recommendations[0].name, 'Cheese Pizza')
+})
+
+test('a model hall without a pick is filled before the shortlist is topped up', async () => {
+  const ai = fakeAi({
+    interpretation: interpretationOutput,
+    ranking: JSON.stringify({ best_location: 'warren', summary: 'Warren has more options.', picks: [{ ref: 'c1', reason: 'Pizza first.' }] }),
+  })
+  const result = await recommend({ preferences: prefs({ likes: 'pizza' }), date: '2026-10-24', meal: 'Lunch', locations: ['west', 'warren'] }, deps({ ai }))
+  assert.equal(result.best_location.id, 'warren')
+  assert.equal(result.best_location_source, 'ai')
+  assert.equal(result.recommendations.length, 5)
+  const warren = result.recommendations.filter(item => item.location.id === 'warren')
+  assert.equal(warren.length, 3)
+  assert.ok(warren.some(item => item.item_id === 'W1'))
+})
+
+test('a full model shortlist that ignores its own hall falls back to weighted location', async () => {
+  const ai = fakeAi({
+    interpretation: '{}',
+    ranking: input => {
+      const refs = input.messages[1].content
+        .split('\n')
+        .filter(line => /^c\d+ \|/.test(line))
+        .filter(line => !line.includes('| warren |'))
+        .slice(0, 5)
+        .map(line => line.split(' | ')[0])
+      return JSON.stringify({ best_location: 'warren', summary: 'Tradeoff.', picks: refs.map(ref => ({ ref, reason: 'Fine.' })) })
+    },
+  })
+  const result = await recommend(
+    { preferences: prefs(), date: '2026-10-24', meal: 'Lunch', locations: ['marciano', 'warren', 'west'] },
+    deps({ ai }),
+  )
+  assert.equal(result.recommendations.length, 5)
+  assert.equal(result.best_location_source, 'weighted')
+  assert.notEqual(result.best_location.id, 'warren')
+  assert.equal(result.best_location.id, result.recommendations[0].location.id)
+})
+
+test('interpretation failure keeps the AI ranking result', async () => {
+  const ai = fakeAi({
+    interpretation: new Error('boom'),
+    ranking: JSON.stringify({ best_location: 'west', summary: 'Pizza.', picks: [{ ref: 'c1', reason: 'Cheesy.' }] }),
+  })
+  const result = await recommend({ preferences: prefs({ likes: 'pizza' }), date: '2026-10-24', meal: 'Lunch', locations: ['west'] }, deps({ ai }))
+  assert.equal(result.fallback, false)
+  assert.equal(result.preference_interpretation.source, 'fallback')
+  assert.deepEqual(result.preference_interpretation.keywords, ['pizza'])
+  assert.equal(result.recommendations[0].reason, 'Cheesy.')
+})
+
+test('rule-based picks explain which keywords matched', async () => {
+  const result = await recommend({ preferences: prefs({ likes: 'pizza' }), date: '2026-10-24', meal: 'Lunch', locations: ['west'] }, deps())
+  assert.equal(result.fallback, true)
+  assert.equal(result.best_location_source, 'weighted')
+  assert.match(result.recommendations[0].reason, /pizza/)
+  assert.match(result.recommendations[0].reason, /450 kcal/)
+})
+
+test('repeated likes reuse the cached interpretation', async () => {
+  const db = fakeDb()
+  const ai = fakeAi({
+    interpretation: interpretationOutput,
+    ranking: JSON.stringify({ best_location: 'west', summary: 'Pizza.', picks: [{ ref: 'c1', reason: 'Cheesy.' }] }),
+  })
+  const args = { preferences: prefs({ likes: 'pizza' }), date: '2026-10-24', meal: 'Lunch', locations: ['west'] }
+  await recommend(args, deps({ ai, db }))
+  const countInterpretations = () => ai.calls.filter(call => /structured search terms/.test(call.input.messages[0].content)).length
+  assert.equal(countInterpretations(), 1)
+  await recommend(args, deps({ ai, db }))
+  assert.equal(countInterpretations(), 1)
+  assert.equal(db.rows.size, 1)
 })

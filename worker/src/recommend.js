@@ -2,8 +2,9 @@ import { HttpError, assertKnownKeys, isPlainObject } from './http.js'
 import {
   LOCATIONS, LOCATION_IDS, MAX_DAYS_AHEAD, MAX_RECOMMENDATIONS, MEALS,
   bestLocationFor, daysBetween, fetchItem, fetchMenu, filterItems,
-  isValidDate, normalizeMeal, todayInNewYork,
+  isValidDate, normalizeMeal, recommendationReason, todayInNewYork,
 } from './dining.js'
+import { resolveInterpretation } from './interpretation-cache.js'
 import { buildCandidates, buildMessages, parseModelOutput, runModel } from './llm.js'
 import { DEFAULT_PRIORITY_ORDER, DEFAULT_WEIGHTS } from './recommendation-settings.js'
 import { scoreCandidates } from './scoring.js'
@@ -76,14 +77,44 @@ function present(item, reason, detail) {
 }
 
 /**
+ * Uses the model's hall choice when it is coherent. A hall without any pick is filled with
+ * its highest-scoring candidate, so the UI never claims a hall it does not show.
+ */
+function chooseBestLocation(modelLocation, picks, candidates) {
+  const fallback = { picks, location: picks[0].item.location, source: 'weighted' }
+  if (!modelLocation) return fallback
+  if (picks.some(pick => pick.item.location === modelLocation)) {
+    return { picks, location: modelLocation, source: 'ai' }
+  }
+  if (picks.length >= MAX_RECOMMENDATIONS) return fallback
+  const fill = candidates.find(item => item.location === modelLocation
+    && !picks.some(pick => pick.item.id === item.id && pick.item.location === item.location))
+  if (!fill) return fallback
+  return {
+    picks: [...picks, { item: fill, reason: recommendationReason(fill, fill.matched_keywords) }],
+    location: modelLocation,
+    source: 'ai',
+  }
+}
+
+/**
  * Full recommendation pipeline:
- * menus (parallel) → normalize → hard filters → cap → LLM rank (validated, with rule-based fallback) → item details.
- * deps: { apiKey, fetcher, cache, ai, log }
+ * menus (parallel) + preference interpretation (parallel) → normalize → hard filters → score
+ * → LLM rank (validated, with rule-based fallback) → item details.
+ * deps: { apiKey, fetcher, cache, ai, db, userId, log }
  */
 export async function recommend({ preferences, goals = {}, goalScope = 'daily', locationRanks = {}, settings = {
   mode: 'default', priority_order: DEFAULT_PRIORITY_ORDER, custom_weights: DEFAULT_WEIGHTS,
 }, date, meal, locations }, deps) {
   const warnings = []
+  // Start interpretation immediately so it overlaps the menu requests. This never rejects.
+  const interpretationPromise = resolveInterpretation({
+    ai: deps.ai,
+    db: deps.db,
+    userId: deps.userId,
+    likes: typeof preferences.likes === 'string' ? preferences.likes : '',
+    log: deps.log,
+  })
   const menus = await Promise.allSettled(locations.map(id => fetchMenu(id, date, deps)))
   const summaries = []
   let candidates = []
@@ -112,7 +143,10 @@ export async function recommend({ preferences, goals = {}, goalScope = 'daily', 
     throw new HttpError(502, 'Unable to load dining menus right now. Please try again later.')
   }
 
-  const base = { date, meal, locations: summaries, warnings, model: null, fallback: false, score_version: 1, score_weights: null }
+  const base = {
+    date, meal, locations: summaries, warnings, model: null, fallback: false,
+    score_version: 1, score_weights: null, preference_interpretation: null, best_location_source: null,
+  }
   if (!candidates.length) {
     return {
       ...base,
@@ -122,19 +156,52 @@ export async function recommend({ preferences, goals = {}, goalScope = 'daily', 
     }
   }
 
-  const scored = scoreCandidates(candidates, { preferences, goals: goalScope === 'per-serving' ? goals : {}, locationRanks, settings })
+  const interpretation = await interpretationPromise
+  if (interpretation.source !== 'none') {
+    base.preference_interpretation = {
+      source: interpretation.source,
+      keywords: interpretation.keywords,
+      include: interpretation.include,
+      exclude: interpretation.exclude,
+      flavors: interpretation.flavors,
+    }
+  }
+
+  const scored = scoreCandidates(candidates, { preferences, goals: goalScope === 'per-serving' ? goals : {}, locationRanks, settings, interpretation })
   candidates = scored.items.slice(0, 20)
   base.score_weights = scored.weights
   if (goalScope !== 'per-serving' && Object.keys(goals).length) warnings.push('Daily nutrition targets were not used; save per-serving targets to include nutrition in scoring.')
   if (scored.missingNutrition) warnings.push(`${scored.missingNutrition} dish(es) were omitted because nutrition data was incomplete for your selected goals.`)
   if (!candidates.length) return { ...base, best_location: null, summary: 'No dishes have enough nutrition data to score against your selected goals.', recommendations: [] }
   const candidateLocations = [...new Set(candidates.map(item => item.location))]
+  // Hall-level facts the per-dish scorer cannot express. They let the model compare halls
+  // instead of just inheriting the highest-scoring dish's location.
+  const halls = candidateLocations.map(id => {
+    const group = candidates.filter(item => item.location === id)
+    return {
+      id,
+      name: LOCATIONS[id],
+      matching: group.length,
+      top_score: group[0]?.score ?? 0,
+      avg_score: group.reduce((sum, item) => sum + item.score, 0) / group.length,
+      user_rank: locationRanks[id] ?? null,
+    }
+  })
   let ranked = null
   if (deps.ai) {
     const { lines, byRef } = buildCandidates(candidates)
     try {
       const output = await runModel(deps.ai, {
-        messages: buildMessages({ preferences, goals: goalScope === 'per-serving' ? goals : {}, weights: scored.weights, meal: meal === 'current' ? 'whatever is being served now' : meal, date, lines }),
+        messages: buildMessages({
+          preferences,
+          goals: goalScope === 'per-serving' ? goals : {},
+          weights: scored.weights,
+          meal: meal === 'current' ? 'whatever is being served now' : meal,
+          date,
+          lines,
+          interpretation,
+          halls,
+        }),
         locationIds: candidateLocations,
       })
       ranked = parseModelOutput(output, byRef, candidateLocations)
@@ -144,18 +211,25 @@ export async function recommend({ preferences, goals = {}, goalScope = 'daily', 
     }
   }
 
-  const fallbackPicks = candidates.slice(0, MAX_RECOMMENDATIONS).map(item => ({ item, reason: 'Ranked by your preference weights.' }))
+  const fallbackPicks = candidates.slice(0, MAX_RECOMMENDATIONS).map(item => ({
+    item,
+    reason: recommendationReason(item, item.matched_keywords),
+  }))
   let picks
   let summary
   let bestLocation
+  let bestLocationSource = 'weighted'
   if (ranked) {
-    // Top up with rule-based picks if the model returned fewer than requested.
-    picks = [...ranked.picks]
+    // Let the model's hall choice add a pick before the shortlist is topped up, so a hall
+    // the model recommends is always represented among the shown dishes.
+    const choice = chooseBestLocation(ranked.bestLocation, ranked.picks, candidates)
+    picks = [...choice.picks]
     for (const pick of fallbackPicks) {
       if (picks.length >= MAX_RECOMMENDATIONS) break
       if (!picks.some(existing => existing.item === pick.item)) picks.push(pick)
     }
-    bestLocation = picks[0].item.location
+    bestLocation = choice.location
+    bestLocationSource = choice.source
     summary = ranked.summary
     base.model = 'workers-ai'
   } else {
@@ -163,6 +237,7 @@ export async function recommend({ preferences, goals = {}, goalScope = 'daily', 
     bestLocation = bestLocationFor(picks)
     base.fallback = true
   }
+  base.best_location_source = bestLocationSource
   const aiItems = new Set(ranked?.picks.map(pick => pick.item) || [])
   summary ||= `${LOCATIONS[bestLocation]} looks like your best option for this meal.`
 

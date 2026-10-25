@@ -100,11 +100,11 @@ defineExpose({ validate, save })
       </fieldset>
       <section class="preference-subsection" aria-labelledby="food-preferences-title">
         <h2 id="food-preferences-title">Your food preferences</h2>
-        <p class="intro">Enter food names or keywords you like. These influence ranking, but do not filter dishes out.</p>
+        <p class="intro">Enter foods, tastes or ingredients you like. These influence ranking, but do not filter dishes out.</p>
         <div class="field">
           <label for="likes">Foods or keywords you like</label>
-          <textarea id="likes" v-model="form.likes" rows="3" :maxlength="MAX_LIKES" placeholder="e.g. spicy food, chicken, noodles" :disabled="saving" aria-describedby="likes-hint"></textarea>
-          <p id="likes-hint" class="hint">{{ likesLeft }} characters left. Separate keywords with commas. Written in English works best.</p>
+          <textarea id="likes" v-model="form.likes" rows="3" :maxlength="MAX_LIKES" placeholder="e.g. spicy chicken, noodles, 想吃辣的鸡肉，不要香菜" :disabled="saving" aria-describedby="likes-hint"></textarea>
+          <p id="likes-hint" class="hint">{{ likesLeft }} characters left. English or Chinese. AI translates and expands these into menu search terms.</p>
         </div>
       </section>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>

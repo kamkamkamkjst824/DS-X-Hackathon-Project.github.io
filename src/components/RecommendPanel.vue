@@ -34,6 +34,16 @@ const availableMeals = ref([])
 let availabilityRequest = 0
 let dateRefreshInterval
 const sourceUrls = computed(() => [...new Set((result.value?.recommendations || []).map(item => item.source_url).filter(Boolean))])
+const interpretation = computed(() => result.value?.preference_interpretation || null)
+const interpretationTerms = computed(() => {
+  const data = interpretation.value
+  if (!data) return []
+  return [...new Set([
+    ...(data.flavors || []).map(term => `Wants ${term}`),
+    ...(data.include || []).map(term => `Wants ${term}`),
+    ...(data.exclude || []).map(term => `Avoid ${term}`),
+  ])]
+})
 const favoriteRecommendations = computed(() => (result.value?.recommendations || []).filter(item => isFavorite(item)))
 const topRecommendations = computed(() => (result.value?.recommendations || []).filter(item => !isFavorite(item)))
 
@@ -134,7 +144,7 @@ async function submit() {
       throw new Error('Choose at least one location in Location preference before requesting recommendations.')
     }
 
-    const response = await request('/api/recommend', { method: 'POST', token: props.token, timeout: 45000, body: {
+    const response = await request('/api/recommend', { method: 'POST', token: props.token, timeout: 60000, body: {
       date: date.value,
       meal: meal.value,
       locations,
@@ -223,8 +233,21 @@ async function submit() {
           <p v-if="result.score_weights?.nutrition === 0" class="hint">To include nutrition, add a target for one dish above and give nutrition a positive weight, then save and recommend again.</p>
         </div>
 
+        <div v-if="interpretationTerms.length" class="preference-summary">
+          <h3>How AI read your food preferences</h3>
+          <p class="hint">These terms steer ranking only. They never filter dishes out, and dietary needs still apply first.</p>
+          <ul class="rec-tags interpretation-terms" aria-label="Interpreted food preferences">
+            <li v-for="term in interpretationTerms" :key="term">
+              {{ term }}
+            </li>
+          </ul>
+          <p v-if="interpretation.source === 'fallback'" class="hint">
+            AI interpretation was unavailable, so keywords were matched literally.
+          </p>
+        </div>
+
         <div v-if="result.best_location" class="best-pick">
-          <span class="account-label">Best pick for you</span>
+          <span class="account-label">Best dining hall for you</span>
           <h3>{{ result.best_location.name }}</h3>
           <p>{{ result.summary }}</p>
         </div>

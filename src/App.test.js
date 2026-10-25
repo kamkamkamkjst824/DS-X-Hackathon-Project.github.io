@@ -39,7 +39,15 @@ async function openPlanner({ goals = {}, goalScope = 'per-serving', failSave = '
         stale: false,
       })
     }
-    if (path === '/api/recommend') return reply({ recommendations: [], summary: 'Test recommendation.', score_weights: { nutrition: 100 }, warnings: [] })
+    if (path === '/api/recommend') return reply({
+      recommendations: [],
+      summary: 'Test recommendation.',
+      score_weights: { nutrition: 100 },
+      warnings: [],
+      best_location: { id: 'west', name: 'West Campus' },
+      best_location_source: 'ai',
+      preference_interpretation: { source: 'ai', keywords: ['spicy', 'chicken'], include: ['chicken'], exclude: ['cilantro'], flavors: ['spicy'] },
+    })
     throw new Error(`Unexpected path: ${path}`)
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -80,6 +88,15 @@ describe('Unified dining planner', () => {
     expect(fetchMock.mock.calls.slice(recIndex + 1).some(([, init]) => init.method === 'PUT')).toBe(false)
     expect(recommendations(fetchMock)).toHaveLength(1)
     expect(wrapper.text()).toContain('Test recommendation.')
+  })
+
+  it('shows how AI interpreted the food preferences and the suggested hall', async () => {
+    await openPlanner()
+    await run()
+    expect(wrapper.text()).toContain('Best dining hall for you')
+    expect(wrapper.find('.interpretation-terms').text()).toContain('Wants spicy')
+    expect(wrapper.find('.interpretation-terms').text()).toContain('Wants chicken')
+    expect(wrapper.find('.interpretation-terms').text()).toContain('Avoid cilantro')
   })
 
   it('validates every panel before writing any settings', async () => {

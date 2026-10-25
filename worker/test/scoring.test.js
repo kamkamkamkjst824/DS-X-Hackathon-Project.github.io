@@ -34,6 +34,36 @@ test('missing nutrition values are omitted instead of treated as zero', () => {
   assert.equal(result.missingNutrition, 1)
 })
 
+test('AI keywords activate food scoring for non-English likes', () => {
+  const interpretation = { keywords: ['spicy', 'chicken'], include: [], exclude: [], flavors: ['spicy'] }
+  const input = {
+    preferences: { likes: '想吃辣的鸡肉' }, goals: {}, locationRanks: {}, settings,
+  }
+  const withAi = scoreCandidates([dish('a', 'Spicy Chicken Bowl', 'west', 500)], { ...input, interpretation })
+  assert.equal(withAi.items[0].scores.food, 100)
+  assert.ok(withAi.weights.food > 0)
+  assert.deepEqual(withAi.items[0].matched_keywords, ['spicy', 'chicken'])
+
+  // Without interpretation the same Chinese text yields no usable keyword and the dimension is inactive.
+  const literal = scoreCandidates([dish('a', 'Spicy Chicken Bowl', 'west', 500)], input)
+  assert.equal(literal.weights.food, 0)
+  assert.equal(literal.items[0].scores.food, null)
+})
+
+test('avoided terms demote but never remove a dish', () => {
+  const result = scoreCandidates([dish('a', 'Fried Chicken', 'west', 500), dish('b', 'Grilled Chicken', 'west', 500)], {
+    preferences: { likes: 'chicken' }, goals: {}, locationRanks: {}, settings,
+    interpretation: { keywords: ['chicken'], include: [], exclude: ['fried'], flavors: [] },
+  })
+  const fried = result.items.find(item => item.id === 'a')
+  const grilled = result.items.find(item => item.id === 'b')
+  assert.equal(result.items.length, 2)
+  assert.equal(fried.scores.food, 25)
+  assert.equal(grilled.scores.food, 100)
+  assert.deepEqual(fried.avoided_terms, ['fried'])
+  assert.deepEqual(grilled.avoided_terms, [])
+})
+
 test('recommendation settings validation rejects duplicate priorities and empty weights', () => {
   const valid = { mode: 'advanced', priority_order: DEFAULT_PRIORITY_ORDER, custom_weights: { nutrition: 0, food: 50, location: 50 } }
   assert.deepEqual(parseRecommendationSettings(valid), valid)

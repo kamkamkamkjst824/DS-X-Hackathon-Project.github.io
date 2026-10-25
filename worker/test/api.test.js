@@ -68,6 +68,10 @@ test('recommend applies saved preferences, survives a failed hall and enriches d
   assert.ok(data.recommendations.every(r => r.tags.halal))
   assert.equal(data.recommendations[0].ingredients, 'Ingredients of Chicken Tikka Masala')
   assert.deepEqual(data.best_location, { id: 'warren', name: 'Warren Towers' })
+  assert.equal(data.best_location_source, 'weighted')
+  // No AI binding in this Worker: the interpretation degrades to literal keyword matching.
+  assert.equal(data.preference_interpretation.source, 'fallback')
+  assert.deepEqual(data.preference_interpretation.keywords, ['chicken'])
   assert.ok(bu.calls.length > 0 && bu.calls.every(call => call.key === 'test-key'))
   assert.equal((await send('/api/recommend', { token: carol, body: { meal: 'Snack' } })).status, 400)
   assert.equal((await send('/api/recommend', { token: carol, body: { meal: 'Lunch', locations: ['nowhere'] } })).status, 400)

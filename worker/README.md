@@ -75,10 +75,11 @@ The Worker stores its data in Cloudflare D1 (SQLite). It is bound as `DB` in `wr
 | `location_preferences` | Included dining halls and their preference order | `0003_locations.sql` |
 | `nutrition_preferences` | Per-user nutrition goals and whether they are daily or per-serving | `0004_nutrition.sql`, `0006_nutrition_scope.sql` |
 | `recommendation_settings` | Default or Advanced Mode and custom factor weights | `0005_recommendation_settings.sql` |
+| `preference_interpretations` | Cached Workers AI interpretation of the free-text food preferences, keyed by the likes text and model | `0007_preference_interpretations.sql` |
 
 Dining menus are not stored in D1. They are cached for 10 minutes with the Workers Cache API (`src/dining.js`).
 
-`GET/PUT /api/recommendation-settings` stores a user's recommendation mode, priority order, and custom weights. `POST /api/recommend` applies dietary and location filters, calculates weighted scores, then asks Workers AI to select up to five dishes from the highest-scoring candidates. If AI is unavailable, the Worker returns the highest-scoring dishes directly.
+`GET/PUT /api/recommendation-settings` stores a user's recommendation mode, priority order, and custom weights. `POST /api/recommend` applies dietary and location filters, interprets the free-text food preferences with Workers AI (cached in `preference_interpretations`), calculates weighted scores, then asks Workers AI to select up to five dishes and the best dining hall from the highest-scoring candidates. If AI is unavailable, the Worker returns the highest-scoring dishes directly and explains them with matched keywords.
 
 ### Authenticated menu proxy
 

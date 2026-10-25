@@ -37,8 +37,9 @@ flowchart TD
     W -->|Server adds x-api-key and User-Agent| B[BU Dining API]
     W --> C[Menu cache: 10 minutes]
     U --> L[localStorage: session token, legacy ranking priorities]
-    W --> R[Filter dishes, calculate weighted scores, shortlist top 20]
-    R --> A[Workers AI selects up to five dishes]
+    W --> I[Workers AI interprets free-text food preferences, D1 caches the result]
+    I --> R[Filter dishes, calculate weighted scores, shortlist top 20]
+    R --> A[Workers AI selects up to five dishes and the best dining hall]
     A --> U
 ```
 
@@ -48,14 +49,16 @@ The browser sends the user's session token to the Worker, which adds its BU API 
 
 ### Hybrid recommendation model
 
-The current system combines **rule-based filtering, weighted scoring, and LLM selection**. It has not removed all rule-based recommendation logic:
+The current system combines **rule-based filtering, weighted scoring, LLM preference interpretation, and LLM selection**. It has not removed the rule-based recommendation logic:
 
 - **Rules determine eligibility:** required dietary labels and excluded dining halls are applied before scoring. Selected menu stations are also excluded.
-- **Deterministic scores create the shortlist:** nutrition target matching, food keyword matching, and location ranks produce a weighted score. The top 20 candidates are sent to Workers AI.
-- **The LLM makes the final selection:** it receives user preferences, candidate scores, and effective weights, and selects up to five dishes with reasons. It can only choose from the supplied shortlist; it cannot recommend a filtered-out dish or one outside the top 20, or change the scoring weights.
-- **Weighted scores provide a fallback:** if AI is unavailable, times out, or produces unusable output, the Worker returns the highest-scoring dishes. If AI selects fewer than five valid dishes, weighted picks fill the remaining places when candidates are available.
+- **Workers AI interprets the free-text food preferences:** up to 300 characters, English or Chinese, are converted into English search terms (`keywords`, `include`, `exclude`, `flavors`) by `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. The output is sanitized (lowercase, length-capped, deduplicated) and cached per account in D1, keyed by the likes text and the model name.
+- **Deterministic scores create the shortlist:** nutrition target matching, food matching, and location ranks produce a weighted score. Interpreted terms extend the literal keywords instead of replacing them, and `exclude` terms only scale the food score down (×0.25); they never filter a dish out. The top 20 candidates are sent to Workers AI.
+- **The LLM makes the final selection:** it receives interpreted preferences, candidate scores, effective weights, and a hall summary (candidate count, top and average score, the user's location rank). It selects up to five dishes with reasons and chooses the best dining hall. It can only choose from the supplied shortlist and cannot change the scoring weights.
+- **The model's hall choice is validated:** if the chosen hall has no pick yet, its highest-scoring candidate is added before the shortlist is topped up. If the model returns a full shortlist that ignores its own hall, the hall of the first pick is used instead and `best_location_source` reports `weighted`.
+- **Weighted scores provide a fallback:** if AI is unavailable, times out, or produces unusable output, the Worker returns the highest-scoring dishes with keyword-based explanations. If AI selects fewer than five valid dishes, weighted picks fill the remaining places when candidates are available.
 
-The former frontend priority-by-priority comparison (compare priority 1, then priority 2 only for ties, then priority 3) has been removed from the main recommendation flow. Hard filters, numerical scoring, and deterministic fallback remain part of the current design. Food keyword scoring is still text matching rather than semantic matching by the LLM.
+The former frontend priority-by-priority comparison (compare priority 1, then priority 2 only for ties, then priority 3) has been removed from the main recommendation flow. Hard filters, numerical scoring, and deterministic fallback remain part of the current design. Food keyword scoring remains deterministic text matching; the LLM supplies additional search terms and personalization, and never inspects, filters, or reweights the menu by itself.
 
 ### Request flow
 
@@ -63,10 +66,10 @@ The former frontend priority-by-priority comparison (compare priority 1, then pr
 2. The app shows registration/sign-in when there is no valid session, or the preference and recommendation panels after successful authentication.
 3. The user edits dietary needs, food keywords, location rankings, nutrition targets for one dish, and ranking priorities. There are no separate save buttons on the main page.
 4. Clicking **Save and recommend** validates every panel before writing anything, saves the current preferences, then sends the selected date, meal, and included locations to `POST /api/recommend`. If validation or saving fails, it does not request recommendations. Saves use separate API calls, so a server failure can leave some panels saved; the page reports the error and lets the user retry.
-5. The Worker loads the account's saved preferences, nutrition goals, location rankings, and scoring settings from D1, then fetches menus using the server-side key.
-6. It normalizes menu items, applies dietary and location filters, and scores the remaining dishes using the active preference weights.
-7. Workers AI receives the top 20 scored candidates, user preferences, and effective weights. Its selections are validated against those candidates. If AI fails, the Worker uses the highest-scoring dishes.
-8. The page displays up to five recommendations with reasons, score breakdowns, and effective scoring weights. See [Recommendation priorities](#recommendation-priorities-weighted-scoring-and-advanced-mode) for why these weights can differ from the configured values.
+5. The Worker loads the account's saved preferences, nutrition goals, location rankings, and scoring settings from D1, then fetches menus using the server-side key. It starts interpreting the free-text food preferences in parallel and reuses the cached D1 interpretation when the text and model are unchanged.
+6. It normalizes menu items, applies dietary and location filters, and scores the remaining dishes using the active preference weights and the interpreted food terms.
+7. Workers AI receives the top 20 scored candidates, the interpreted preferences, the hall summary, and the effective weights. Its selections and its `best_location` are validated against the candidates; if AI fails, the Worker uses the highest-scoring dishes and their matched keywords.
+8. The page displays up to five recommendations with reasons, score breakdowns, the interpreted food preferences, the suggested dining hall, and effective scoring weights. See [Recommendation priorities](#recommendation-priorities-weighted-scoring-and-advanced-mode) for why these weights can differ from the configured values.
 
 ## Feature logic
 
@@ -89,14 +92,16 @@ Vegan dishes also satisfy Vegetarian. Saving Vegan also sets the Vegetarian pref
 
 Dietary requirements always run before ranking. A preferred location or a better nutrition match cannot compensate for failing a required label. Labels come from BU's menu data; the project does not independently verify ingredients, allergens, or preparation practices.
 
-### Food preferences: keyword matching
+### Food preferences: AI interpretation and keyword matching
 
 - Food preferences accept up to 300 characters and are saved with the user's Worker account preferences.
-- Scoring extracts up to 20 unique English words of at least three letters, removes stop words, and ignores case.
-- It matches keywords against dish names and descriptions, including simple plural handling. The food score is `100 × matched keywords / total keywords`; English keywords work best.
-- This numerical score uses text matching. The LLM also receives the preferences when selecting and explaining recommendations.
-- Keywords affect ordering only. Dishes with no keyword match remain eligible.
-- Unmatched keywords contribute zero to the food score; they do not cause dishes to be rejected.
+- Workers AI converts the text into up to eight English `keywords`, six `include` foods, six `exclude` ingredients, and four `flavors`. Non-English text is translated, so Chinese input also produces usable menu search terms.
+- The request is schema-constrained and the output is sanitized: lowercase, single spaces, at most 24 characters per term, deduplicated, and length-capped. The student's text is delimited and treated as data in the prompt.
+- Interpretation is cached in D1 per account, keyed by the likes text and model. Editing the preferences or changing the model retires the cache entry; a fallback (AI unavailable) is never cached, so the next request retries.
+- Scoring still extracts up to 20 literal English words of at least three letters and removes stop words. The interpreted keywords are merged with those literal words (capped at 10 total), so English input behaves as before and non-English input becomes usable.
+- Matching is against dish names and descriptions, including simple plural handling. The food score is `100 × matched keywords / total keywords`. An `exclude` term multiplies that dish's food score by 0.25; it does not remove the dish.
+- Keywords affect ordering only. Dishes with no keyword match remain eligible. Dietary labels are still hard filters and are never derived from the LLM.
+- A literal keyword cannot be removed by the model: the merge keeps every word the old keyword matcher would have used.
 
 ### Location preferences: ordering and exclusion
 
@@ -146,7 +151,7 @@ The **Scoring weights** shown with a recommendation are the **effective weights 
 `effective weight = active raw weight / sum of active raw weights × 100`
 
 - Nutrition is active when saved goals are nonempty and have per-serving scope, which the main page sets automatically for new targets and reviewed legacy targets.
-- Food preferences are active when the saved food preference text is nonempty. Having text that matches no dishes still gives a food score of zero; it does not disable this dimension.
+- Food preferences are active when at least one scoring keyword exists: the literal English words in the saved text plus the AI-interpreted terms. Text with no usable keyword, such as non-English text with no `AI` binding, leaves the dimension inactive.
 - Location remains active for the included halls. If all active raw weights are zero, the Worker uses location alone at 100%.
 
 For example, with default weights of nutrition 45, food 35, and location 20, but no per-serving nutrition goals, nutrition is excluded. The active total becomes `35 + 20 = 55`:
@@ -159,7 +164,7 @@ For example, with default weights of nutrition 45, food 35, and location 20, but
 
 This does not change the saved settings. It applies in both default and Advanced Mode, so the percentages previewed beside the Advanced Mode sliders can differ from the result if a dimension is inactive. To include nutrition, enter at least one target for one dish, give nutrition a positive weight, and click **Save and recommend**. Existing daily targets require the one-time review described above.
 
-Each dish's total score is the weighted sum of its 0–100 factor scores. Location ranks 1, 2, and 3 score 100, 50, and 0 respectively. Dietary labels and excluded halls are always filtered first. The LLM receives the scores and effective weights to select and explain recommendations; it does not set or change the weights.
+Each dish's total score is the weighted sum of its 0–100 factor scores. Location ranks 1, 2, and 3 score 100, 50, and 0 respectively. Dietary labels and excluded halls are always filtered first. The LLM receives the scores, effective weights, interpreted preferences, and the hall summary; it selects and explains dishes and chooses the best hall, but it does not set or change the weights or eligibility.
 
 ### Dates, meals, and result cards
 
@@ -168,7 +173,7 @@ Each dish's total score is the weighted sum of its 0–100 factor scores. Locati
 - Now uses each location's `current_meal` from the BU response. A location without a current meal or matching menu may contribute no dishes.
 - Cards show the dish name, location, meal, station, description, available nutrition values, dietary labels, and BU source links.
 - The Worker attempts to fetch ingredient details for the selected dishes. Unavailable details are reported rather than generated.
-- The page displays at most five dishes. Its best location comes from the recommendations, rather than an independent aggregate score over the entire menu.
+- The page displays at most five dishes. `best_location` is the model's hall-level choice, validated against the picks that are actually shown; it is not an average over the whole menu. When AI is unavailable, it is the first pick's hall and `best_location_source` is `weighted`.
 - The Worker excludes selected condiment/create-your-own/salad-bar stations before scoring candidates.
 
 ### Partial failures and error handling
@@ -191,6 +196,7 @@ The menu endpoint allows 30 requests per user per fixed one-minute window. Loadi
 | Request counters | D1 `rate_limits` | Per account and rate-limit bucket |
 | Browser session token | localStorage `bu-auth-session` | Current browser origin |
 | Priority order, mode, and custom weights | D1 `recommendation_settings` | Per account; legacy localStorage priorities used for migration |
+| Cached AI preference interpretation | D1 `preference_interpretations` | Per account; retired when the likes text or model changes |
 | BU menus | Workers Cache API | Reused under a ten-minute cache policy |
 | BU_API_KEY | Worker secret; `.dev.vars` for local Worker development | Server-side only |
 
@@ -221,13 +227,62 @@ Errors normally use `{ "error": "English message" }`. Cross-origin access is lim
 
 The Worker recommendation endpoint accepts `{ date?, meal, locations? }`:
 
-1. Load dietary preferences, location rankings, nutrition goals and scope, and scoring settings from D1; fetch menus concurrently.
+1. Load dietary preferences, location rankings, nutrition goals and scope, and scoring settings from D1. Start interpreting the free-text preferences (D1 cache first) and fetch menus concurrently.
 2. Normalize and deduplicate dishes, exclude selected condiment/create-your-own/salad-bar stations, and apply dietary and location filters.
-3. Compute effective weights and weighted scores, then shortlist the top 20 candidates.
-4. Try Workers AI with a list of allowed candidate references and validate the model's output against that list.
+3. Compute effective weights and weighted scores, then shortlist the top 20 candidates. Interpreted terms extend the literal keywords; `exclude` terms only demote.
+4. Try Workers AI with a list of allowed candidate references, the interpreted preferences, and a hall summary; validate the model's picks and its `best_location` against those candidates.
 5. Fall back to deterministic ranking if AI is unavailable, times out, or returns invalid output. Return at most five dishes and attempt to enrich them with ingredient details.
 
-This endpoint allows six requests per user per minute. The current page uses this pipeline and displays the effective weights returned by the Worker.
+Responses also include `preference_interpretation` (`source` is `ai`, `fallback`, or `none`) and `best_location_source` (`ai` or `weighted`). Both are additive fields: older clients can ignore them, and a missing interpretation never fails the request. An excerpt with the new fields:
+
+```json
+{
+  "date": "2026-10-25",
+  "meal": "Lunch",
+  "model": "workers-ai",
+  "fallback": false,
+  "best_location": { "id": "warren", "name": "Warren Towers" },
+  "best_location_source": "ai",
+  "summary": "Warren Towers offers the strongest curry match for this lunch.",
+  "score_weights": { "nutrition": 0, "food": 63.6, "location": 36.4 },
+  "preference_interpretation": {
+    "source": "ai",
+    "keywords": ["spicy", "chicken", "curry"],
+    "include": ["chicken"],
+    "exclude": ["cilantro"],
+    "flavors": ["spicy"]
+  },
+  "warnings": [],
+  "recommendations": [
+    {
+      "item_id": "abc123",
+      "name": "Chicken Tikka Masala",
+      "location": { "id": "warren", "name": "Warren Towers" },
+      "reason": "Spiced chicken in tomato cream sauce matches what you asked for.",
+      "recommendation_source": "AI",
+      "score": 70.5,
+      "score_breakdown": { "nutrition": null, "food": 100, "location": 50 }
+    }
+  ]
+}
+```
+
+Per-dish ingredient details, tags, and nutrition are omitted from this excerpt. Current bounds:
+
+| Bound | Value |
+| --- | --- |
+| Interpretation output | ≤8 `keywords`, ≤6 `include`, ≤6 `exclude`, ≤4 `flavors`; ≤24 characters per term |
+| Scoring keywords | Literal English words plus interpreted keywords, capped at 10 total |
+| Avoided-term effect | Food score × 0.25; never filters a dish and never overrides a dietary label |
+| Ranking input | Top 20 scored candidates; at most 5 picks |
+| Interpretation timeout | 6 seconds |
+| Ranking timeout | 25 seconds |
+| AI calls per request | 2 cold; 1 when the interpretation cache hits |
+| Interpretation cache | Per account, keyed by `sha256(model + likes)`; `fallback` results are not cached |
+| Frontend request timeout | 60 seconds for `/api/recommend` |
+| Rate limit | 6 `/api/recommend` requests per user per minute |
+
+This endpoint allows six requests per user per minute. Each request makes at most two Workers AI calls (interpretation and ranking); the interpretation call is skipped when the cached text is unchanged or no food preferences are saved. The current page uses this pipeline and displays the effective weights returned by the Worker.
 
 ## Local development
 
@@ -299,12 +354,14 @@ Deploy backend changes from this repository's `worker/` directory. Pushing the r
 npx wrangler login
 # Initial key setup or rotation: enter the key interactively, not in source code.
 npx wrangler secret put BU_API_KEY
-# Run when there are pending D1 migrations (for example 0004_nutrition.sql).
+# Run when there are pending D1 migrations (for example 0004_nutrition.sql or 0007_preference_interpretations.sql).
 npm run db:migrate:remote
 npm run deploy
 ```
 
 Configure the intended D1 binding and `ALLOWED_ORIGINS` in `wrangler.jsonc`. For GitHub Pages, the origin is `https://kamkamkamkjst824.github.io`, without the repository path. Existing deployments do not need a new database or a repeated secret update when those values have not changed.
+
+Migration `0007_preference_interpretations.sql` adds the interpretation cache. The Worker still answers without it: the cache read and write failures are logged, the interpretation falls back to literal keywords, and no request fails. Apply it whenever non-English or AI-expanded preferences matter, then deploy the Worker.
 
 ## Code map and verification
 
@@ -315,12 +372,14 @@ Configure the intended D1 binding and `ALLOWED_ORIGINS` in `wrangler.jsonc`. For
 | `src/dining.js` | Worker menu loading, meal selection, normalization, partial failures |
 | `src/recommendationRanking.js` | Legacy priority migration and saved location reads |
 | `worker/src/scoring.js`, `worker/src/recommendation-settings.js` | Factor scores, active weight normalization, and saved scoring settings |
-| `worker/src/recommend.js`, `worker/src/llm.js` | Candidate filtering, scoring, AI selection, validation, and fallback |
+| `worker/src/recommend.js`, `worker/src/llm.js` | Candidate filtering, scoring, interpretation plumbing, AI selection, validation, and fallback |
+| `worker/src/interpret.js`, `worker/src/interpretation-cache.js` | Preference-interpretation prompt/schema/sanitizer, D1 cache, and graceful fallback |
+| `worker/migrations/0007_preference_interpretations.sql` | Cached interpretation table |
 | `src/components/PreferencesForm.vue` | Account dietary labels and food keywords |
 | `src/components/LocationPreference.vue` | Worker location ranking reads and writes |
 | `src/components/NutritionPreferences.vue` | Worker nutrition target reads, writes, and reset |
 | `src/components/RecommendationPriorities.vue` | Priority editing, swapping, and storage |
-| `src/components/RecommendPanel.vue` | Recommendation requests, effective weights, explanations, and results |
+| `src/components/RecommendPanel.vue` | Recommendation requests, effective weights, interpreted preferences, explanations, and results |
 | `src/components/RecommendationCard.vue` | Individual dish presentation |
 | `vite.config.js` | Vue integration, port 5173, test configuration |
 | `.github/workflows/deploy.yml` | Frontend Pages build and deployment |
@@ -340,7 +399,7 @@ npm test
 npm run check
 ```
 
-Frontend tests cover authenticated menu calls, partial failures, session expiry, dietary and keyword ranking, nutrition goal storage and ranking, location exclusion, priority order, and the result limit. Worker tests use isolated Miniflare/D1 instances for accounts, input validation, CORS, location and nutrition preferences, menu proxying, upstream authentication errors, and recommendation fallback. They do not use the production database as a test database.
+Frontend tests cover authenticated menu calls, partial failures, session expiry, dietary and keyword ranking, nutrition goal storage and ranking, location exclusion, priority order, the result limit, and the interpreted-preference display. Worker tests use isolated Miniflare/D1 instances for accounts, input validation, CORS, location and nutrition preferences, menu proxying, upstream authentication errors, recommendation fallback, interpretation sanitization, cache hits, and model hall validation. They do not use the production database as a test database.
 
 ## Troubleshooting and current limitations
 
@@ -356,5 +415,6 @@ Frontend tests cover authenticated menu calls, partial failures, session expiry,
 | No dishes | Check the date, meal, operating hours, and dietary restrictions. |
 | Scoring weights differ from configured weights; Nutrition is 0% | Only active dimensions are normalized to 100%. Enter a nutrition target for one dish, give nutrition a positive weight, then Save and recommend; see the calculation example above. |
 | Recommendation priorities shows Unable to connect | Check that the Worker has the new `/api/recommendation-settings` route and migrations 0005/0006 deployed. A missing route can fail CORS preflight and appear as a connection error. |
+| Food preferences seem ignored | Check that migration 0007 is applied. Without the cache table the interpretation still falls back to literal keywords. Non-English preferences need the `AI` binding; without it no English search terms are produced. |
 
-The project remains a prototype: nutrition targets are not a daily meal plan, menus can change, and menu labels do not replace direct allergen confirmation with dining staff.
+The project remains a prototype: nutrition targets are not a daily meal plan, menus can change, and menu labels do not replace direct allergen confirmation with dining staff. AI interpretation of free-text preferences can be wrong or over-broad; it only reorders dishes, and every dish still passes the deterministic dietary filters.

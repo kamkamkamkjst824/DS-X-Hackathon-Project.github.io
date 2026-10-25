@@ -181,6 +181,14 @@ function describeNutrition(item) {
   return parts.join(', ')
 }
 
+/** User-facing explanation for a rule-based pick, shared by rankItems and the AI fallback. */
+export function recommendationReason(item, matched = []) {
+  const nutrition = describeNutrition(item)
+  const hits = matched.slice(0, 3)
+  if (hits.length) return `Matches your interest in ${hits.join(', ')}${nutrition ? ` (${nutrition})` : ''}.`
+  return `Fits your dietary settings${nutrition ? ` with ${nutrition}` : ''}.`
+}
+
 /** Rule-based ranking used before the LLM and as its fallback. */
 export function rankItems(items, preferences, max = MAX_RECOMMENDATIONS) {
   const keywords = likeKeywords(preferences.likes)
@@ -188,13 +196,7 @@ export function rankItems(items, preferences, max = MAX_RECOMMENDATIONS) {
     .map(item => ({ item, score: rankScore(item, keywords), matches: matchedKeywords(item, keywords) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, max)
-    .map(({ item, matches }) => {
-      const nutrition = describeNutrition(item)
-      const reason = matches.length
-        ? `Matches your interest in ${matches.slice(0, 3).join(', ')}${nutrition ? ` (${nutrition})` : ''}.`
-        : `Fits your dietary settings${nutrition ? ` with ${nutrition}` : ''}.`
-      return { item, reason }
-    })
+    .map(({ item, matches }) => ({ item, reason: recommendationReason(item, matches) }))
 }
 
 /** Without a model verdict, the best location is the one serving the top-ranked pick. */

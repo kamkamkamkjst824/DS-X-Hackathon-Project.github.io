@@ -153,6 +153,8 @@ async function postRecommend(request, env, { user }) {
     fetcher: (input, init) => fetch(input, init),
     cache: typeof caches !== 'undefined' ? caches.default : null,
     ai: env.AI ?? null,
+    db: env.DB,
+    userId: user.id,
     log: (...args) => console.warn('[recommend]', ...args),
   })
   return json(result)
