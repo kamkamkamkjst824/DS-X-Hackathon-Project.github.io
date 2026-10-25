@@ -67,6 +67,7 @@ async function submit() {
 <template>
   <section class="panel" aria-labelledby="recommend-title" :aria-busy="loading">
     <h2 id="recommend-title">Dish recommendation</h2>
+    <p class="intro">This website should not be used for nutritional advice and instead as recommendations</p>
     <p class="intro">{{ beforeRecommend ? 'Save all your current preferences and get AI recommendations in one step.' : 'AI recommendations use your saved dietary needs and preference weights.' }}</p>
     <form novalidate @submit.prevent="submit">
       <div class="field-row">
