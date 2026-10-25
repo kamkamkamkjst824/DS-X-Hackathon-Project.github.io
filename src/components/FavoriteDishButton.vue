@@ -95,13 +95,13 @@ onUnmounted(() => {
       class="favorite-button"
       :class="{ selected: favorite }"
       :aria-pressed="favorite"
+      :aria-label="favorite ? `Remove ${dish.name} from favorites` : `Add ${dish.name} to favorites`"
+      :title="favorite ? 'Remove from favorites' : 'Add to favorites'"
       @click="toggle"
     >
       <span aria-hidden="true">
-        {{ favorite ? '♥' : '♡' }}
+        {{ favorite ? '★' : '☆' }}
       </span>
-
-      {{ favorite ? 'Unfavorite' : 'Favorite' }}
     </button>
 
     <small v-if="error" role="alert">
@@ -118,26 +118,24 @@ onUnmounted(() => {
 }
 
 .favorite-button {
-  display: inline-flex;
-  gap: 6px;
+  display: inline-grid;
+  place-items: center;
   align-items: center;
-
-  border: 1px solid #b71932;
-  background: white;
-  color: #b71932;
-
-  border-radius: 999px;
-  padding: 7px 12px;
-
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e8d7a2;
+  border-radius: 50%;
+  background: #fff9e8;
+  color: #9a6b00;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .favorite-button.selected {
-  background: #b71932;
-  color: white;
+  border-color: #e3c766;
+  background: #fff2c6;
 }
 
 .favorite-button:hover {

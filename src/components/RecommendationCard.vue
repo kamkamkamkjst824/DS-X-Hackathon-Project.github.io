@@ -7,7 +7,9 @@ const props = defineProps({
   item: { type: Object, required: true },
   rank: { type: Number, required: true },
   email: { type: String, default: '' },
+  canAddConsumed: { type: Boolean, default: false },
 })
+const emit = defineEmits(['consumed'])
 
 const TAG_LABELS = {
   vegan: 'Vegan',
@@ -80,6 +82,15 @@ const favoriteDish = computed(() => ({
           :email="email"
         />
       </div>
+      <button
+        v-if="canAddConsumed"
+        class="rec-consumed"
+        type="button"
+        :aria-label="`Add ${item.name} as consumed food`"
+        @click="emit('consumed', item)"
+      >
+        + Add as consumed
+      </button>
     </div>
     <p class="rec-score"><strong>Preference score: {{ Number(item.score || 0).toFixed(1) }}/100</strong>
       <span v-if="item.score_breakdown"> · Nutrition {{ item.score_breakdown.nutrition ?? '—' }} · Food {{ item.score_breakdown.food ?? '—' }} · Location {{ item.score_breakdown.location }}</span>

@@ -28,6 +28,7 @@ export function savePreferences(token, preferences) {
 }
 
 export async function getDiningMenus({ date, meal, locations, token }) {
+  const isToday = date === diningDate()
   const results = await Promise.allSettled(locations.map(async location => {
     const query = new URLSearchParams({ day: date })
     const menu = await request(`/api/v1/dining/locations/${encodeURIComponent(location)}/menu?${query}`, {
@@ -40,7 +41,16 @@ export async function getDiningMenus({ date, meal, locations, token }) {
     const selectedMeal = meal.toLocaleLowerCase() === 'current'
       ? menu.current_meal?.toLocaleLowerCase()
       : meal.toLocaleLowerCase()
-    const meals = menu.meals.filter(entry => entry.name.toLocaleLowerCase() === selectedMeal)
+    const currentMeal = typeof menu.current_meal === 'string' ? menu.current_meal : null
+    const hallIsOpen = menu.open_now !== false
+      && (typeof menu.status !== 'string' || menu.status.toLocaleLowerCase() !== 'closed')
+    const isCurrentSelection = meal.toLocaleLowerCase() === 'current'
+    const selectedMealIsServing = !isToday || !isCurrentSelection
+      || (hallIsOpen && selectedMeal && currentMeal?.toLocaleLowerCase() === selectedMeal)
+    const meals = menu.meals.filter(entry => typeof entry.name === 'string'
+      && selectedMeal
+      && entry.name.toLocaleLowerCase() === selectedMeal
+      && selectedMealIsServing)
     const items = meals.flatMap(mealEntry => mealEntry.stations.flatMap(station => (
       station.items.map(item => ({
         item_id: item.id,
@@ -70,7 +80,19 @@ export async function getDiningMenus({ date, meal, locations, token }) {
         stale: menu.stale,
       }))
     )))
-    return { location: menu.location, items, stale: menu.stale, sourceUrl: menu.source_url }
+    return {
+      location: menu.location,
+      items,
+      stale: menu.stale,
+      sourceUrl: menu.source_url,
+      availableMeals: menu.meals.flatMap(entry => typeof entry.name === 'string' ? [entry.name] : []),
+      currentMeal,
+      servingNow: Boolean(hallIsOpen && currentMeal),
+      status: typeof menu.status === 'string' ? menu.status : null,
+      openNow: typeof menu.open_now === 'boolean' ? menu.open_now : null,
+      selectedMeal: typeof selectedMeal === 'string' ? selectedMeal : null,
+      selectedMealIsServing: Boolean(selectedMealIsServing),
+    }
   }))
 
   const expired = results.find(result => result.status === 'rejected'
@@ -87,6 +109,20 @@ export async function getDiningMenus({ date, meal, locations, token }) {
 
   return {
     recommendations: availableMenus.flatMap(menu => menu.items),
+    availableMeals: [...new Set(availableMenus.flatMap(menu => menu.availableMeals))],
+    currentMeals: [...new Set(availableMenus.flatMap(menu => menu.servingNow ? [menu.currentMeal] : []))],
+    locations: availableMenus.map(menu => ({
+      id: menu.location.id,
+      name: menu.location.name,
+      status: menu.status,
+      openNow: menu.openNow,
+      currentMeal: menu.currentMeal,
+      servingNow: menu.servingNow,
+      selectedMeal: menu.selectedMeal,
+      selectedMealIsServing: menu.selectedMealIsServing,
+      availableMeals: menu.availableMeals,
+      itemCount: menu.items.length,
+    })),
     warnings: menus.filter(menu => menu.error).map(menu => menu.error),
     staleLocations: availableMenus.filter(menu => menu.stale).map(menu => menu.location.name),
     sourceUrls: [...new Set(availableMenus.map(menu => menu.sourceUrl))],

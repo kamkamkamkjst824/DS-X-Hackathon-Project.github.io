@@ -28,6 +28,17 @@ async function openPlanner({ goals = {}, goalScope = 'per-serving', failSave = '
     if (path === '/api/location-preferences') return reply({ preferences: [{ location: 'warren', rank: 1 }] })
     if (path === '/api/nutrition-preferences') return reply({ goals, goalScope })
     if (path === '/api/recommendation-settings') return reply(settings)
+    if (path.includes('/api/v1/dining/locations/')) {
+      return reply({
+        location: { id: 'warren', name: 'Warren Towers', source_url: 'https://www.bu.edu/dining/' },
+        meals: [{ name: 'Lunch', stations: [] }],
+        open_now: true,
+        status: 'open',
+        current_meal: 'Lunch',
+        source_url: 'https://www.bu.edu/dining/',
+        stale: false,
+      })
+    }
     if (path === '/api/recommend') return reply({ recommendations: [], summary: 'Test recommendation.', score_weights: { nutrition: 100 }, warnings: [] })
     throw new Error(`Unexpected path: ${path}`)
   })
@@ -48,7 +59,7 @@ describe('Unified dining planner', () => {
   it('saves current edits from every panel before requesting a recommendation', async () => {
     const fetchMock = await openPlanner()
     expect(wrapper.findComponent(RecommendPanel).props('email')).toBe('planner@bu.edu')
-    expect(wrapper.findAll('button[type="submit"]')).toHaveLength(1)
+    expect(wrapper.findAll('button[type="submit"]')).toHaveLength(2)
     expect(wrapper.find('#nutrition-scope').exists()).toBe(false)
     await wrapper.find('#likes').setValue('chicken')
     await wrapper.find('#preference-west').setValue('2')

@@ -1,40 +1,118 @@
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ApiError, request } from '../api.js'
-import { LOCATIONS, MAX_DAYS_AHEAD, MEALS, diningDate } from '../dining.js'
+import { LOCATIONS, MAX_DAYS_AHEAD, MEALS, diningDate, getDiningMenus } from '../dining.js'
 import RecommendationCard from './RecommendationCard.vue'
 import { readLocationRanks } from '../recommendationRanking.js'
+import { FAVORITES_EVENT, dishKey, readFavorites } from '../utils/dishFavorites.js'
 
 const props = defineProps({ token: { type: String, required: true }, email: { type: String, default: '' }, beforeRecommend: Function })
-const emit = defineEmits(['expired', 'busy'])
+const emit = defineEmits(['expired', 'busy', 'consumed'])
 
 const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
-
-const dates = Array.from({ length: MAX_DAYS_AHEAD + 1 }, (_, offset) => {
-  const value = diningDate(offset)
+const today = ref(diningDate())
+const dates = computed(() => Array.from({ length: MAX_DAYS_AHEAD + 1 }, (_, offset) => {
+  const value = diningDate(offset, new Date(`${today.value}T12:00:00Z`))
   const label = offset === 0
     ? 'Today'
     : offset === 1
       ? 'Tomorrow'
       : weekday.format(new Date(`${value}T12:00:00Z`))
   return { value, label }
-})
-
-const date = ref(dates[0].value)
+}))
+const date = ref(today.value)
 const meal = ref('current')
 const loading = ref(false)
 const error = ref('')
+const availabilityError = ref('')
+const availabilityLoading = ref(false)
 const result = ref(null)
 const notices = ref([])
+const favoriteKeys = ref(readFavorites(props.email).map(favorite => favorite.key))
+const availableMeals = ref([])
+let availabilityRequest = 0
+let dateRefreshInterval
 const sourceUrls = computed(() => [...new Set((result.value?.recommendations || []).map(item => item.source_url).filter(Boolean))])
+const favoriteRecommendations = computed(() => (result.value?.recommendations || []).filter(item => isFavorite(item)))
+const topRecommendations = computed(() => (result.value?.recommendations || []).filter(item => !isFavorite(item)))
 
-const isToday = computed(() => date.value === dates[0].value)
-const mealOptions = computed(() => MEALS.filter(name => name !== 'current' || isToday.value))
+function favoriteKey(item) {
+  return dishKey({
+    id: item.item_id ?? item.id,
+    name: item.name,
+    location: item.location?.id ?? item.location,
+  })
+}
+
+function isFavorite(item) {
+  const key = favoriteKey(item)
+  return Boolean(key && favoriteKeys.value.includes(key))
+}
+
+function refreshFavorites(event) {
+  if (event && event.detail?.email !== props.email) return
+  favoriteKeys.value = readFavorites(props.email).map(favorite => favorite.key)
+}
+
+function handleStorage(event) {
+  if (event.key === `bu-dish-favorites:${props.email.trim().toLowerCase()}`) refreshFavorites()
+}
+
+const isToday = computed(() => date.value === today.value)
+const mealOptions = computed(() => [
+  ...(isToday.value ? ['current'] : []),
+  ...availableMeals.value.filter(name => name.toLocaleLowerCase() !== 'current'),
+])
+
+async function refreshAvailableMeals() {
+  const requestId = ++availabilityRequest
+  availabilityLoading.value = true
+  availabilityError.value = ''
+  availableMeals.value = []
+  try {
+    const ranks = await readLocationRanks(props.token)
+    const locations = LOCATIONS.filter(location => Object.hasOwn(ranks, location.id)).map(location => location.id)
+    if (!locations.length) return
+    const response = await getDiningMenus({ token: props.token, date: date.value, meal: 'current', locations })
+    if (requestId === availabilityRequest) availableMeals.value = response.availableMeals
+  } catch (cause) {
+    if (requestId === availabilityRequest) {
+      if (cause instanceof ApiError && cause.status === 401) emit('expired')
+      else availabilityError.value = cause.message
+    }
+  } finally {
+    if (requestId === availabilityRequest) availabilityLoading.value = false
+  }
+}
 
 // "Now" only makes sense for today.
 watch(isToday, today => {
   if (!today && meal.value === 'current') meal.value = 'Lunch'
+})
+watch(date, nextDate => {
+  if (!dates.value.some(option => option.value === nextDate)) return
+  refreshAvailableMeals()
+})
+watch(mealOptions, options => {
+  if (options.length && !options.includes(meal.value)) {
+    meal.value = options.includes('Lunch') ? 'Lunch' : options[0]
+  }
+})
+
+onMounted(() => {
+  refreshAvailableMeals()
+  window.addEventListener(FAVORITES_EVENT, refreshFavorites)
+  window.addEventListener('storage', handleStorage)
+  dateRefreshInterval = window.setInterval(() => {
+    const currentDate = diningDate()
+    if (today.value !== currentDate) today.value = currentDate
+  }, 60000)
+})
+onUnmounted(() => {
+  window.removeEventListener(FAVORITES_EVENT, refreshFavorites)
+  window.removeEventListener('storage', handleStorage)
+  window.clearInterval(dateRefreshInterval)
 })
 
 async function submit() {
@@ -61,7 +139,14 @@ async function submit() {
       meal: meal.value,
       locations,
     } })
-    result.value = { ...response, preferenceSummary: Object.entries(response.score_weights || {})
+    const seen = new Set()
+    const recommendations = response.recommendations.filter(item => {
+      const key = `${item.location?.id}:${item.item_id}:${item.meal}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    result.value = { ...response, recommendations, preferenceSummary: Object.entries(response.score_weights || {})
       .map(([key, value]) => `${{ nutrition: 'Nutrition', food: 'Food preferences', location: 'Dining location' }[key]}: ${value}%`) }
     notices.value = response.warnings || []
   } catch (cause) {
@@ -114,6 +199,8 @@ async function submit() {
           </select>
         </div>
       </div>
+      <p v-if="availabilityLoading" class="hint" role="status">Checking meals scheduled for this day…</p>
+      <p v-else-if="availabilityError" class="hint" role="alert">{{ availabilityError }}</p>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>
       <button class="primary" type="submit" :disabled="loading">{{ loading ? 'Finding dishes…' : beforeRecommend ? 'Save and recommend' : 'Dish recommendation' }}</button>
     </form>
@@ -158,9 +245,34 @@ async function submit() {
         <p v-if="result.fallback && result.recommendations.length" class="hint">
           Our AI assistant was unavailable, so these dishes are ranked by your weighted scores.
         </p>
-        <ol v-if="result.recommendations.length" class="rec-list">
-          <RecommendationCard v-for="(item, index) in result.recommendations" :key="`${item.location.id}:${item.item_id}`" :item="item" :rank="index + 1" :email="email" />
-        </ol>
+        <section v-if="favoriteRecommendations.length" class="recommendation-group" aria-labelledby="favorite-recommendations-title">
+          <h3 id="favorite-recommendations-title">Favorite dishes</h3>
+          <ol class="rec-list favorite-list">
+            <RecommendationCard
+              v-for="(item, index) in favoriteRecommendations"
+              :key="`${item.location.id}:${item.item_id}:${item.meal}:${item.station}:${index}`"
+              :item="item"
+              :rank="index + 1"
+              :email="email"
+              :can-add-consumed="isToday"
+              @consumed="emit('consumed', { item, date })"
+            />
+          </ol>
+        </section>
+        <section v-if="topRecommendations.length" class="recommendation-group" aria-labelledby="top-recommendations-title">
+          <h3 id="top-recommendations-title">Top recommendations</h3>
+          <ol class="rec-list">
+            <RecommendationCard
+              v-for="(item, index) in topRecommendations"
+              :key="`${item.location.id}:${item.item_id}:${item.meal}:${item.station}:${index}`"
+              :item="item"
+              :rank="index + 1"
+              :email="email"
+              :can-add-consumed="isToday"
+              @consumed="emit('consumed', { item, date })"
+            />
+          </ol>
+        </section>
 
         <p class="footnote">
           Menus are provided by BU Dining Services and may change.

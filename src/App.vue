@@ -1,6 +1,6 @@
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   api,
   ApiError,
@@ -15,6 +15,7 @@ import LocationPreference from './components/LocationPreference.vue'
 import NutritionPreferences from './components/NutritionPreferences.vue'
 import RecommendationPriorities from './components/RecommendationPriorities.vue'
 import ProfileMenu from './components/ProfileMenu.vue'
+import NutritionTracker from './components/NutritionTracker.vue'
 
 const mode = ref('login')
 const email = ref('')
@@ -30,6 +31,11 @@ const preferencesForm = ref(null)
 const locationPreference = ref(null)
 const nutritionPreferences = ref(null)
 const recommendationPriorities = ref(null)
+const activeSection = ref('dining')
+const sidebarExpanded = ref(false)
+const nutritionTracker = ref(null)
+const toast = ref('')
+let toastTimeout
 
 async function saveAllPreferences() {
   const panels = [preferencesForm.value, locationPreference.value, nutritionPreferences.value, recommendationPriorities.value]
@@ -38,6 +44,15 @@ async function saveAllPreferences() {
   for (const panel of panels) {
     if (!await panel.save()) throw new Error('Some preferences could not be saved. Please check the messages above and try again.')
   }
+}
+
+function addConsumedDish({ item, date }) {
+  if (!nutritionTracker.value?.addFood(item, date)) return
+  toast.value = 'Added as consumed'
+  window.clearTimeout(toastTimeout)
+  toastTimeout = window.setTimeout(() => {
+    toast.value = ''
+  }, 3000)
 }
 
 const isRegister = computed(() => mode.value === 'register')
@@ -181,10 +196,12 @@ function sessionExpired() {
 }
 
 onMounted(restoreSession)
+onUnmounted(() => window.clearTimeout(toastTimeout))
 </script>
 
 <template>
   <main class="page">
+    <p v-if="toast" class="app-toast" role="status" aria-live="polite">{{ toast }}</p>
 
     <!-- Profile menu -->
     <ProfileMenu
@@ -230,6 +247,49 @@ onMounted(restoreSession)
           <button class="secondary" type="button" :disabled="busy || planning" @click="logout">{{ busy ? 'Signing out…' : 'Sign out' }}</button>
         </header>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
+        <div class="dashboard-layout" :class="{ 'sidebar-expanded': sidebarExpanded }">
+          <nav class="dashboard-sidebar" :class="{ expanded: sidebarExpanded }" aria-label="Dashboard sections">
+            <button
+              class="sidebar-toggle"
+              type="button"
+              :aria-label="sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'"
+              :aria-expanded="sidebarExpanded"
+              @click="sidebarExpanded = !sidebarExpanded"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              <span v-if="sidebarExpanded">Collapse</span>
+            </button>
+            <button
+              type="button"
+              :class="{ active: activeSection === 'dining' }"
+              :aria-current="activeSection === 'dining' ? 'page' : undefined"
+              aria-label="Dining"
+              title="Dining"
+              @click="activeSection = 'dining'"
+            >
+              <svg class="sidebar-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="m3 11 9-7 9 7M5.5 10v10h13V10M9 20v-6h6v6" />
+              </svg>
+              <span v-if="sidebarExpanded">Dining</span>
+            </button>
+            <button
+              type="button"
+              :class="{ active: activeSection === 'nutrition' }"
+              :aria-current="activeSection === 'nutrition' ? 'page' : undefined"
+              aria-label="Nutrient Tracker"
+              title="Nutrient Tracker"
+              @click="activeSection = 'nutrition'"
+            >
+              <svg class="sidebar-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M5 20V12m7 8V5m7 15v-11M3 20h18" />
+              </svg>
+              <span v-if="sidebarExpanded">Nutrient Tracker</span>
+            </button>
+          </nav>
+          <div class="dashboard-section">
+            <section v-show="activeSection === 'dining'">
         <p class="intro">Adjust your preferences below, then choose Save and recommend. Your changes are saved together before finding dishes.</p>
         <fieldset class="planner-fields" :disabled="planning">
         <PreferencesForm ref="preferencesForm" :token="token" unified @expired="sessionExpired" />
@@ -240,7 +300,24 @@ onMounted(restoreSession)
         </div>
         <RecommendationPriorities ref="recommendationPriorities" :token="token" unified @expired="sessionExpired" />
         </fieldset>
-        <RecommendPanel :token="token" :email="user.email" :before-recommend="saveAllPreferences" @busy="planning = $event" @expired="sessionExpired" />
+        <RecommendPanel
+          :token="token"
+          :email="user.email"
+          :before-recommend="saveAllPreferences"
+          @busy="planning = $event"
+          @expired="sessionExpired"
+          @consumed="addConsumedDish"
+        />
+            </section>
+            <section v-show="activeSection === 'nutrition'">
+              <header class="dashboard-section-heading">
+                <h2>Nutrient Tracker</h2>
+                <p class="intro">Track the nutrition in the foods you have logged as consumed.</p>
+              </header>
+              <NutritionTracker ref="nutritionTracker" :user-email="user.email" />
+            </section>
+          </div>
+        </div>
       </template>
 
       <!-- Connection error -->
